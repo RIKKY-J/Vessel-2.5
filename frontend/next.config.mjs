@@ -25,6 +25,18 @@ const nextConfig = {
     }
     return config;
   },
+  async rewrites() {
+    const backendUrl = process.env.RENDER_BACKEND_URL;
+    if (backendUrl) {
+      return [
+        {
+          source: "/api/preview/:path*",
+          destination: `${backendUrl}/api/preview/:path*`,
+        },
+      ];
+    }
+    return [];
+  },
 };
 
 export default nextConfig;

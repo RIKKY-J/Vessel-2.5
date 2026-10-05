@@ -1,0 +1,41 @@
+{
+  "family": "vessel-runner",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "containerDefinitions": [
+    {
+      "name": "vessel-runner",
+      "image": "rikkyj/runner:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "name": "app-port",
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp"
+        },
+        {
+          "name": "runner-port",
+          "containerPort": 3001,
+          "hostPort": 3001,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "PORT", "value": "3001" },
+        { "name": "NODE_ENV", "value": "production" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vessel-runner",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "runner",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

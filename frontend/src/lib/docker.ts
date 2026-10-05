@@ -5,6 +5,13 @@ import fs from "fs";
 import path from "path";
 import { getLocalWorkspaceDir } from "./s3/projects";
 import { copyTemplateToProject } from "./s3/templates";
+import { isEcsConfigured } from "./ecs";
+
+function shouldUseEcs(): boolean {
+  if (process.env.SANDBOX_PROVIDER === "ecs") return true;
+  if (process.env.SANDBOX_PROVIDER === "docker") return false;
+  return isEcsConfigured();
+}
 
 let dockerInstance: Docker | null = null;
 let isDockerAvailable = false;
@@ -115,6 +122,12 @@ export async function createSandbox(params: {
   language?: string;
 }): Promise<SandboxInfo> {
   const { replId, language = "node-js" } = params;
+
+  if (shouldUseEcs()) {
+    const { createEcsSandbox } = await import("./ecs");
+    return createEcsSandbox({ replId, language });
+  }
+
   const containerName = `vessel-${replId}`;
   const available = await checkDockerAvailability();
 
@@ -289,6 +302,12 @@ export async function createSandbox(params: {
 }
 
 export async function stopSandbox(replId: string): Promise<void> {
+  if (shouldUseEcs()) {
+    const { stopEcsSandbox } = await import("./ecs");
+    await stopEcsSandbox(replId);
+    return;
+  }
+
   const containerName = `vessel-${replId}`;
   const available = await checkDockerAvailability();
 
@@ -312,6 +331,11 @@ export async function stopSandbox(replId: string): Promise<void> {
 }
 
 export async function getSandboxStatus(replId: string): Promise<SandboxInfo> {
+  if (shouldUseEcs()) {
+    const { getEcsSandboxStatus } = await import("./ecs");
+    return getEcsSandboxStatus(replId);
+  }
+
   const containerName = `vessel-${replId}`;
   const available = await checkDockerAvailability();
 
@@ -373,7 +397,15 @@ export async function getSandboxStatus(replId: string): Promise<SandboxInfo> {
   }
 }
 
-export function getSandboxPorts(replId: string): { appPort: number; runnerPort: number } {
+export function getSandboxPorts(replId: string): { appPort: number; runnerPort: number; containerIp?: string } {
+  if (shouldUseEcs()) {
+    try {
+      const { getEcsSandboxPorts } = require("./ecs");
+      const ecsPorts = getEcsSandboxPorts(replId);
+      if (ecsPorts) return ecsPorts;
+    } catch {}
+  }
+
   const cached = sandboxPorts.get(replId);
   if (cached) return cached;
 

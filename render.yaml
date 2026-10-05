@@ -1,0 +1,40 @@
+services:
+  # 🟣 Render Persistent Web Service (WebSocket Proxy, Preview Proxy & AWS ECS Orchestrator)
+  - type: web
+    name: vessel-backend
+    runtime: node
+    plan: starter
+    rootDir: frontend
+    buildCommand: npm install && npx prisma generate
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: S3_BUCKET
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: SANDBOX_PROVIDER
+        value: ecs
+      - key: ECS_CLUSTER
+        sync: false
+      - key: ECS_TASK_DEFINITION
+        sync: false
+      - key: ECS_LAUNCH_TYPE
+        value: FARGATE
+      - key: ECS_SUBNETS
+        sync: false
+      - key: ECS_SECURITY_GROUPS
+        sync: false

@@ -29,7 +29,7 @@ export default async function ProjectWorkspacePage({
   // 1. Authenticate user server-side
   const user = await getAuthenticatedUser();
   if (!user) {
-    redirect("/signin");
+    redirect(`/signin?claim=${encodeURIComponent(projectId)}`);
   }
 
   // 2. Fetch project metadata and verify project ownership

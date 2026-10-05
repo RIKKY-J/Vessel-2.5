@@ -15,6 +15,7 @@ import {
   Square,
   Save,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { File, RemoteFile, Type } from "@/components/editor/file-manager";
@@ -52,6 +53,7 @@ interface IDEProps {
     userId: string;
     email: string;
     name: string;
+    isGuest?: boolean;
   };
 }
 
@@ -643,6 +645,24 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
           </button>
         </div>
       </header>
+
+      {/* Guest Mode Notification Banner */}
+      {user?.isGuest && (
+        <div className="h-9 px-4 bg-gradient-to-r from-amber-500/15 via-[#E73F1E]/20 to-purple-500/15 border-b border-amber-500/30 flex items-center justify-between text-xs font-mono shrink-0 z-20">
+          <div className="flex items-center gap-2 text-amber-200/90 min-w-0">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="font-bold text-amber-300 shrink-0">Temporary Guest Sandbox:</span>
+            <span className="text-slate-300 truncate">Your edits & terminal are live. Sign up to save this project permanently.</span>
+          </div>
+          <Link
+            href={`/signin?claim=${encodeURIComponent(replId)}`}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-[#E73F1E] hover:bg-[#ff4d29] text-white font-bold text-[11px] transition shadow shrink-0 active:scale-95"
+          >
+            <span>Claim & Save</span>
+            <Sparkles className="w-3 h-3" />
+          </Link>
+        </div>
+      )}
 
       {/* Main Workspace Body */}
       <div className="flex-1 flex overflow-hidden relative">

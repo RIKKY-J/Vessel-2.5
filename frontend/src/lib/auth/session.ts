@@ -7,6 +7,7 @@ export interface UserSession {
   userId: string;
   email: string;
   name: string;
+  isGuest?: boolean;
 }
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "vessel-jwt-session-secret-key-98218";
@@ -21,7 +22,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export function createSessionToken(payload: UserSession): string {
-  return jwt.sign(payload, SESSION_SECRET, { expiresIn: "7d" });
+  return jwt.sign(payload, SESSION_SECRET, { expiresIn: payload.isGuest ? "2h" : "7d" });
 }
 
 export function verifySessionToken(token: string): UserSession | null {
@@ -32,6 +33,7 @@ export function verifySessionToken(token: string): UserSession | null {
         userId: decoded.userId,
         email: decoded.email,
         name: decoded.name,
+        isGuest: !!decoded.isGuest,
       };
     }
     return null;

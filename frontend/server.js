@@ -12,30 +12,40 @@ const dev = process.env.NODE_ENV === "development";
 const app = next({ dev, dir: __dirname });
 const handle = app.getRequestHandler();
 
-// ─── Dynamic Runner Port Discovery ───────────────────────────────────────────
-let cachedRunnerPort = null;
-let lastPortCheck = 0;
+// ─── Dynamic Runner Discovery (Local Port & Remote ECS Task IP) ───────────────
+let cachedRunnerTarget = null;
+let lastTargetCheck = 0;
 
-function readPortFromFile(replId) {
+function readTargetFromFile(replId) {
   try {
     const file = path.join(__dirname, "data", "active-sandboxes.json");
     if (fs.existsSync(file)) {
       const data = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (replId && data[replId]?.runnerPort) return data[replId].runnerPort;
+      if (replId && data[replId]) {
+        return {
+          host: data[replId].containerIp || data[replId].taskIp || "127.0.0.1",
+          port: data[replId].runnerPort || 3001,
+        };
+      }
       const keys = Object.keys(data);
       if (keys.length > 0) {
         const last = data[keys[keys.length - 1]];
-        if (last?.runnerPort) return last.runnerPort;
+        if (last) {
+          return {
+            host: last.containerIp || last.taskIp || "127.0.0.1",
+            port: last.runnerPort || 3001,
+          };
+        }
       }
     }
   } catch {}
   return null;
 }
 
-function probePort(port) {
+function probePort(port, host = "127.0.0.1") {
   return new Promise((resolve) => {
     const sock = new net.Socket();
-    sock.setTimeout(300);
+    sock.setTimeout(400);
     sock.once("connect", () => {
       sock.destroy();
       resolve(true);
@@ -48,47 +58,55 @@ function probePort(port) {
       sock.destroy();
       resolve(false);
     });
-    sock.connect(port, "127.0.0.1");
+    sock.connect(port, host);
   });
 }
 
-async function discoverRunnerPort(replId) {
+async function discoverRunnerTargetUrl(replId) {
   const now = Date.now();
-  if (cachedRunnerPort && now - lastPortCheck < 3000) {
-    return cachedRunnerPort;
+  if (cachedRunnerTarget && now - lastTargetCheck < 3000) {
+    return cachedRunnerTarget;
   }
 
-  // Strategy 1: Read from persisted file and verify alive
-  const fromFile = readPortFromFile(replId);
+  // Strategy 1: Read from active-sandboxes (handles both remote ECS IPs and local mapped ports)
+  const fromFile = readTargetFromFile(replId);
   if (fromFile) {
-    const alive = await probePort(fromFile);
-    if (alive) {
-      cachedRunnerPort = fromFile;
-      lastPortCheck = now;
-      return fromFile;
-    }
+    const targetUrl = `http://${fromFile.host}:${fromFile.port}`;
+    cachedRunnerTarget = targetUrl;
+    lastTargetCheck = now;
+    return targetUrl;
   }
 
-  // Strategy 2: Probe common runner ports
+  // Strategy 2: Probe local ports for Docker/local runner
   const candidates = [3001, 3002, 3003, 3004, 3005, 40000, 40001, 40002];
   for (const port of candidates) {
     if (port === parseInt(process.env.PORT || "3000")) continue;
-    const alive = await probePort(port);
+    const alive = await probePort(port, "127.0.0.1");
     if (alive) {
-      cachedRunnerPort = port;
-      lastPortCheck = now;
-      console.log(`[Proxy] Discovered active runner on port ${port}`);
-      return port;
+      const targetUrl = `http://127.0.0.1:${port}`;
+      cachedRunnerTarget = targetUrl;
+      lastTargetCheck = now;
+      console.log(`[Proxy] Discovered active local runner on ${targetUrl}`);
+      return targetUrl;
     }
   }
 
-  // Strategy 3: Fall back to file value or 3001
-  return fromFile || 3001;
+  return "http://127.0.0.1:3001";
+}
+
+async function discoverRunnerPort(replId) {
+  const targetUrl = await discoverRunnerTargetUrl(replId);
+  try {
+    const u = new URL(targetUrl);
+    return parseInt(u.port || "3001", 10);
+  } catch {
+    return 3001;
+  }
 }
 
 function invalidatePortCache() {
-  cachedRunnerPort = null;
-  lastPortCheck = 0;
+  cachedRunnerTarget = null;
+  lastTargetCheck = 0;
 }
 
 // ─── HTTP Proxy ──────────────────────────────────────────────────────────────
@@ -201,16 +219,26 @@ app.prepare().then(() => {
   const requestHandler = async (req, res) => {
     const parsedUrl = parse(req.url, true);
 
+    // Set permissive CORS headers for Render backend when serving requests from Vercel
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     // Direct Docker diagnostic endpoint in server.js (instant, no build needed)
     if (parsedUrl.pathname === "/api/docker-status") {
       return handleDockerStatus(req, res, parsedUrl);
     }
 
-    // Proxy Socket.IO HTTP long-polling to active runner container
+    // Proxy Socket.IO HTTP long-polling to active runner container (Local Port or Remote ECS IP)
     if (parsedUrl.pathname && parsedUrl.pathname.startsWith("/socket.io/")) {
       const replId = parsedUrl.query?.replId;
-      const targetPort = await discoverRunnerPort(replId);
-      proxy.web(req, res, { target: `http://127.0.0.1:${targetPort}` });
+      const targetUrl = await discoverRunnerTargetUrl(replId);
+      proxy.web(req, res, { target: targetUrl });
       return;
     }
 
@@ -227,9 +255,9 @@ app.prepare().then(() => {
 
     if (pathname && pathname.startsWith("/socket.io/")) {
       const replId = query?.replId;
-      const targetPort = await discoverRunnerPort(replId);
-      console.log(`[Proxy] WS upgrade for replId=${replId} → 127.0.0.1:${targetPort}`);
-      proxy.ws(req, socket, head, { target: `http://127.0.0.1:${targetPort}` });
+      const targetUrl = await discoverRunnerTargetUrl(replId);
+      console.log(`[Proxy] WS upgrade for replId=${replId} → ${targetUrl}`);
+      proxy.ws(req, socket, head, { target: targetUrl });
       return;
     }
 

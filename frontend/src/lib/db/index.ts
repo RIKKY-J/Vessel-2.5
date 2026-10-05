@@ -108,6 +108,16 @@ class MemoryStore {
     this.projects.delete(id);
     this.settings.delete(id);
   }
+
+  async claimProject(replId: string, newUserId: string): Promise<boolean> {
+    const p = await this.findProjectByReplId(replId);
+    if (p) {
+      p.user_id = newUserId;
+      p.updated_at = new Date();
+      return true;
+    }
+    return false;
+  }
 }
 
 const memoryStore = new MemoryStore();
@@ -456,4 +466,22 @@ export async function deleteProject(id: string): Promise<void> {
   }
 
   await memoryStore.deleteProject(id);
+}
+
+export async function claimProject(replId: string, newUserId: string): Promise<boolean> {
+  const available = await isPostgresAvailable();
+
+  if (available) {
+    try {
+      await prisma.project.update({
+        where: { repl_id: replId },
+        data: { user_id: newUserId },
+      });
+      return true;
+    } catch (err) {
+      console.warn("[DB] Prisma claimProject error, falling back to memory:", err);
+    }
+  }
+
+  return memoryStore.claimProject(replId, newUserId);
 }

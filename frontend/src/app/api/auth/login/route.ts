@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findUserByEmail } from "@/lib/db";
+import { findUserByEmail, claimProject } from "@/lib/db";
 import { verifyPassword, createSessionToken, getSessionCookieOptions } from "@/lib/auth/session";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { email, password } = body;
+    const { email, password, claimReplId } = body;
 
     if (!email || !password) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
@@ -20,6 +20,16 @@ export async function POST(req: NextRequest) {
     const isValid = await verifyPassword(password, user.password_hash);
     if (!isValid) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+    }
+
+    // If user was previously working in a guest sandbox, claim and attach it to their account
+    if (claimReplId) {
+      try {
+        await claimProject(claimReplId, user.id);
+        console.log(`[Auth] Claimed guest project ${claimReplId} for user ${user.id}`);
+      } catch (err: any) {
+        console.warn(`[Auth] Could not claim guest project ${claimReplId}:`, err.message);
+      }
     }
 
     const token = createSessionToken({

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import axios from "axios";
 import {
   ArrowRight,
   Sparkles,
@@ -14,11 +15,13 @@ import {
   Users,
   Send,
   CheckCircle2,
+  Loader2,
 } from "lucide-react";
 
 export default function HomeLandingPage() {
   const router = useRouter();
   const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+  const [isStartingDemo, setIsStartingDemo] = useState(false);
 
   useEffect(() => {
     try {
@@ -31,6 +34,25 @@ export default function HomeLandingPage() {
 
   const handleOpenWorkspace = () => {
     window.location.href = user ? "/projects" : "/signin";
+  };
+
+  const handleTrySandbox = async (lang: string = "node-js") => {
+    if (isStartingDemo) return;
+    setIsStartingDemo(true);
+    try {
+      const res = await axios.post("/api/auth/guest", { language: lang });
+      if (res.data?.replId) {
+        if (res.data.user) {
+          localStorage.setItem("vessel_user", JSON.stringify(res.data.user));
+        }
+        window.location.href = `/projects/${res.data.replId}?lang=${lang}`;
+      } else {
+        window.location.href = "/projects";
+      }
+    } catch (err: any) {
+      console.warn("Guest sandbox creation failed:", err);
+      window.location.href = "/signin";
+    }
   };
 
   const featurePoints = [
@@ -94,6 +116,19 @@ export default function HomeLandingPage() {
           )}
 
           <button
+            onClick={() => handleTrySandbox("node-js")}
+            disabled={isStartingDemo}
+            className="h-9 px-3.5 rounded-xl bg-[#181C24] hover:bg-[#232936] text-slate-200 hover:text-white text-xs font-semibold transition border border-[#232936] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            {isStartingDemo ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#E73F1E]" />
+            ) : (
+              <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+            )}
+            <span>Try Sandbox</span>
+          </button>
+
+          <button
             onClick={handleOpenWorkspace}
             className="h-9 px-4 rounded-xl bg-[#E73F1E] hover:bg-[#ff4d29] text-white text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer border border-[#E73F1E]"
           >
@@ -129,6 +164,24 @@ export default function HomeLandingPage() {
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
               <button
+                onClick={() => handleTrySandbox("node-js")}
+                disabled={isStartingDemo}
+                className="h-12 px-6 rounded-xl bg-gradient-to-r from-amber-500/20 via-[#E73F1E]/20 to-purple-500/20 hover:from-amber-500/30 hover:via-[#E73F1E]/30 hover:to-purple-500/30 text-white text-sm font-bold transition-all shadow-lg active:scale-95 flex items-center gap-2 cursor-pointer border border-amber-500/40 disabled:opacity-50"
+              >
+                {isStartingDemo ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-[#E73F1E]" />
+                    <span>Booting Guest Sandbox...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
+                    <span>Try Me (Instant Sandbox)</span>
+                  </>
+                )}
+              </button>
+
+              <button
                 onClick={handleOpenWorkspace}
                 className="h-12 px-6 rounded-xl bg-[#E73F1E] hover:bg-[#ff4d29] text-white text-sm font-bold transition-all shadow-lg active:scale-95 flex items-center gap-2 cursor-pointer border border-[#E73F1E]"
               >
@@ -136,7 +189,7 @@ export default function HomeLandingPage() {
                 <ArrowRight className="w-4 h-4" />
               </button>
 
-              <div className="h-12 px-4 rounded-xl bg-[#12151B] border border-[#232936] text-xs font-mono text-slate-400 flex items-center gap-2 select-none">
+              <div className="h-12 px-4 rounded-xl bg-[#12151B] border border-[#232936] text-xs font-mono text-slate-400 hidden sm:flex items-center gap-2 select-none">
                 <span className="bg-[#181C24] border border-[#232936] px-1.5 py-0.5 rounded text-[11px] text-slate-300">⌘</span>
                 <span className="bg-[#181C24] border border-[#232936] px-1.5 py-0.5 rounded text-[11px] text-slate-300">K</span>
                 <span>command palette</span>

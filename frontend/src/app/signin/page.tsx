@@ -26,10 +26,24 @@ export default function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [claimReplId, setClaimReplId] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const claim = params.get("claim");
+        if (claim) {
+          setClaimReplId(claim);
+          setMode("signup");
+        }
+      }
+    } catch {}
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +74,7 @@ export default function AuthPage() {
           email: cleanEmail,
           password,
           name: name.trim() || cleanEmail.split("@")[0],
+          claimReplId: claimReplId || undefined,
         });
 
         const { user, expiresAt } = res.data;
@@ -72,14 +87,15 @@ export default function AuthPage() {
           })
         );
 
-        setSuccessMessage("Account created! Redirecting to your workspaces...");
+        setSuccessMessage("Account created! Redirecting to your workspace...");
         setTimeout(() => {
-          window.location.href = "/projects";
+          window.location.href = claimReplId ? `/projects/${encodeURIComponent(claimReplId)}` : "/projects";
         }, 500);
       } else {
         const res = await axios.post("/api/auth/login", {
           email: cleanEmail,
           password,
+          claimReplId: claimReplId || undefined,
         });
 
         const { user, expiresAt } = res.data;
@@ -92,9 +108,9 @@ export default function AuthPage() {
           })
         );
 
-        setSuccessMessage("Authenticated! Redirecting to workspaces...");
+        setSuccessMessage("Authenticated! Redirecting to workspace...");
         setTimeout(() => {
-          window.location.href = "/projects";
+          window.location.href = claimReplId ? `/projects/${encodeURIComponent(claimReplId)}` : "/projects";
         }, 500);
       }
     } catch (err: any) {
@@ -146,6 +162,15 @@ export default function AuthPage() {
                 ? "Enter your email and password to access your cloud workspaces."
                 : "Register with email to get private isolated workspace storage in S3."}
             </p>
+
+            {claimReplId && (
+              <div className="mt-3 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] font-mono text-amber-200 text-center flex items-center justify-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  Save guest sandbox <strong className="text-white font-bold">{claimReplId}</strong> to your account!
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Tab Switcher */}
