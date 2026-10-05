@@ -3,7 +3,7 @@ services:
   - type: web
     name: vessel-backend
     runtime: node
-    plan: starter
+    plan: free
     rootDir: frontend
     buildCommand: npm install && npx prisma generate
     startCommand: node server.js
