@@ -226,6 +226,75 @@ async function resolveTaskIp(ecs, ec2, cluster, taskArn) {
   throw new Error("Timed out waiting for ECS task network interface attachment.");
 }
 
+let clusterAndTaskDefVerified = false;
+
+/**
+ * Automatically ensures ECS cluster exists and registers task definition if missing
+ */
+async function ensureTaskDefinitionAndCluster(ecs, cluster, taskDef) {
+  if (clusterAndTaskDefVerified) return;
+
+  // 1. Ensure ECS Cluster exists
+  try {
+    const clusterRes = await ecs.describeClusters({ clusters: [cluster] }).promise();
+    const existingCluster = clusterRes.clusters?.find(
+      (c) => c.clusterName === cluster && c.status === "ACTIVE"
+    );
+    if (!existingCluster) {
+      console.log(`[ECS] Cluster '${cluster}' not found or inactive. Automatically creating...`);
+      await ecs.createCluster({ clusterName: cluster }).promise();
+      console.log(`[ECS] Successfully created ECS cluster '${cluster}'.`);
+    } else {
+      console.log(`[ECS] Verified active ECS cluster '${cluster}'.`);
+    }
+  } catch (err) {
+    console.warn(`[ECS] Cluster verification notice: ${err.message}. Ensuring cluster...`);
+    try {
+      await ecs.createCluster({ clusterName: cluster }).promise();
+    } catch {}
+  }
+
+  // 2. Ensure Task Definition exists
+  try {
+    await ecs.describeTaskDefinition({ taskDefinition: taskDef }).promise();
+    console.log(`[ECS] Verified Task Definition '${taskDef}'.`);
+  } catch (err) {
+    console.log(`[ECS] Task Definition '${taskDef}' not found. Automatically registering now...`);
+    try {
+      const runnerImage = process.env.RUNNER_IMAGE || "rikkyj/runner:latest";
+      const regParams = {
+        family: taskDef,
+        networkMode: "awsvpc",
+        requiresCompatibilities: ["FARGATE"],
+        cpu: "1024",
+        memory: "2048",
+        containerDefinitions: [
+          {
+            name: "vessel-runner",
+            image: runnerImage,
+            essential: true,
+            portMappings: [
+              { name: "app-port", containerPort: 3000, hostPort: 3000, protocol: "tcp" },
+              { name: "runner-port", containerPort: 3001, hostPort: 3001, protocol: "tcp" },
+            ],
+            environment: [
+              { name: "PORT", value: "3001" },
+              { name: "NODE_ENV", value: "production" },
+            ],
+          },
+        ],
+      };
+      const regRes = await ecs.registerTaskDefinition(regParams).promise();
+      console.log(`[ECS] Successfully auto-registered Task Definition '${taskDef}' (revision: ${regRes.taskDefinition?.revision})`);
+    } catch (regErr) {
+      console.error(`[ECS] Failed to auto-register task definition '${taskDef}':`, regErr.message);
+      throw new Error(`Task definition '${taskDef}' not found and auto-registration failed: ${regErr.message}`);
+    }
+  }
+
+  clusterAndTaskDefVerified = true;
+}
+
 /**
  * Launches an isolated ECS Fargate sandbox task
  */
@@ -244,6 +313,9 @@ async function createEcsSandbox({ replId, language = "node-js" }) {
 
   // Security Groups: automatically discover or create dedicated SG with open ports 3000-3050
   let securityGroups = await getOrConfigureSecurityGroup(ec2);
+
+  // Automatically ensure cluster and task definition exist in AWS account
+  await ensureTaskDefinitionAndCluster(ecs, cluster, taskDef);
 
   // Check if task is already running
   const cached = ecsTasks.get(replId);
