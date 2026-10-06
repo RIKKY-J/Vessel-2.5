@@ -1,5 +1,14 @@
+# ==============================================================================
+# VESSEL 2.5 - RENDER BLUEPRINT CONFIGURATION (render.yaml)
+# ==============================================================================
+# This Blueprint deploys the persistent backend server for Vessel onto Render.
+# The backend handles:
+#   1. WebSocket (Socket.IO) proxy for the browser terminal & file sync
+#   2. Live HTTP preview reverse proxy (/api/preview/:replId/*)
+#   3. AWS ECS Fargate sandbox container lifecycle management
+# ==============================================================================
+
 services:
-  # 🟣 Render Persistent Web Service (WebSocket Proxy, Preview Proxy & AWS ECS Orchestrator)
   - type: web
     name: vessel-backend
     runtime: node
@@ -7,30 +16,64 @@ services:
     rootDir: server
     buildCommand: npm install && npx prisma generate
     startCommand: node server.js
+
     envVars:
+      # ------------------------------------------------------------------------
+      # 1. REQUIRED USER INPUTS (Render will prompt you to enter these 4 values)
+      # ------------------------------------------------------------------------
+
+      # [1] PostgreSQL Database URL (Neon, Supabase, or Render PostgreSQL)
+      # Format: postgresql://username:password@host:port/database?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+
+      # [2] AWS S3 Bucket Name where project code and templates are stored
+      # Example: vessel-storage-yourname
+      - key: S3_BUCKET
+        sync: false
+
+      # [3] AWS IAM Access Key ID with permissions for S3 & ECS
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+
+      # [4] AWS IAM Secret Access Key
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
+      # ------------------------------------------------------------------------
+      # 2. AUTOMATICALLY PRE-CONFIGURED (Defaults are filled in - no typing needed)
+      # ------------------------------------------------------------------------
+
+      # Environment Mode & Web Port
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3000
-      - key: DATABASE_URL
-        sync: false
+
+      # JWT Session Secret (Render will automatically generate a cryptographically secure 64-char string)
       - key: SESSION_SECRET
         generateValue: true
+
+      # Enforce HTTPS cookies in production
       - key: COOKIE_SECURE
         value: "true"
-      - key: S3_BUCKET
-        sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
-        sync: false
+
+      # AWS Region where your ECS cluster and S3 bucket reside
       - key: AWS_REGION
         value: us-east-1
+
+      # Sandbox Provider (Tells the server to use AWS ECS Fargate for cloud runners)
       - key: SANDBOX_PROVIDER
         value: ecs
+
+      # AWS ECS Cluster Name (Matches infra/ecs-task-definition.json)
       - key: ECS_CLUSTER
         value: vessel-cluster
+
+      # AWS ECS Task Definition Family (Matches infra/ecs-task-definition.json)
       - key: ECS_TASK_DEFINITION
         value: vessel-runner
+
+      # ECS Launch Type (FARGATE provides serverless on-demand containers)
       - key: ECS_LAUNCH_TYPE
         value: FARGATE

@@ -16,7 +16,21 @@ export class SandboxService {
       await copyTemplateToProject(project.language, replId);
     } catch {}
 
-    // 1. Provision Docker container
+    // 1. Provision container via Render backend (production on Vercel) or local Docker (local dev)
+    const backendUrl = process.env.RENDER_BACKEND_URL;
+    if (backendUrl) {
+      try {
+        const res = await axios.post(`${backendUrl}/api/projects/${replId}/start`, {
+          language: project.language,
+        });
+        await projectService.updateStatus(replId, "RUNNING");
+        return res.data.sandbox || { replId, status: "RUNNING" };
+      } catch (err: any) {
+        console.error("[SandboxService] Error starting sandbox on Render backend:", err.message);
+        throw new Error(err.response?.data?.error || err.message);
+      }
+    }
+
     const sandbox = await createSandbox({
       replId,
       language: project.language,
@@ -32,6 +46,15 @@ export class SandboxService {
     const project = await projectService.getProjectByReplId(replId, userId);
     if (!project) {
       throw new Error(`Project ${replId} not found`);
+    }
+
+    const backendUrl = process.env.RENDER_BACKEND_URL;
+    if (backendUrl) {
+      try {
+        await axios.post(`${backendUrl}/api/projects/${replId}/stop`);
+      } catch {}
+      await projectService.updateStatus(replId, "STOPPED");
+      return { success: true, message: `Sandbox ${replId} stopped` };
     }
 
     const ports = getSandboxPorts(replId);
@@ -57,6 +80,17 @@ export class SandboxService {
     if (userId) {
       await projectService.getProjectByReplId(replId, userId);
     }
+
+    const backendUrl = process.env.RENDER_BACKEND_URL;
+    if (backendUrl) {
+      try {
+        const res = await axios.get(`${backendUrl}/api/projects/${replId}/status`);
+        return res.data;
+      } catch {
+        return { replId, status: "STOPPED" };
+      }
+    }
+
     return dockerGetStatus(replId);
   }
 
@@ -73,6 +107,16 @@ export class SandboxService {
 
     // Update settings with last used command
     await projectService.updateSettings(project.id, { run_command: command });
+
+    const backendUrl = process.env.RENDER_BACKEND_URL;
+    if (backendUrl) {
+      try {
+        await axios.post(`${backendUrl}/api/projects/${replId}/run`, { command, path });
+      } catch (err: any) {
+        console.warn(`[SandboxService] Runner /run error on Render backend:`, err.message);
+      }
+      return { success: true, command };
+    }
 
     const ports = getSandboxPorts(replId);
     if (ports?.runnerPort) {
