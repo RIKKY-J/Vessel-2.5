@@ -27,8 +27,41 @@ proxy.on("error", (err, req, resOrSocket) => {
   console.warn("[Proxy] Connection warning:", err.message);
   if (resOrSocket && typeof resOrSocket.writeHead === "function" && !resOrSocket.headersSent) {
     try {
-      resOrSocket.writeHead(502, { "Content-Type": "application/json" });
-      resOrSocket.end(JSON.stringify({ error: "Runner offline or booting", message: err.message }));
+      const isPreview = req && req.url && req.url.includes("/api/preview/");
+      if (isPreview) {
+        resOrSocket.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        resOrSocket.end(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Waiting for App Server</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0B0D11; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: #12151B; border: 1px solid #232936; border-radius: 14px; padding: 32px 24px; max-width: 440px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .spinner { width: 36px; height: 36px; border: 3px solid #232936; border-top-color: #E73F1E; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 18px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { font-size: 17px; margin: 0 0 10px; color: #ffffff; font-weight: 600; }
+    p { font-size: 13px; color: #94a3b8; line-height: 1.6; margin: 0 0 18px; }
+    .hint { background: #181C24; border: 1px solid #232936; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #cbd5e1; font-family: monospace; display: inline-block; }
+    .btn-hint { color: #E73F1E; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h2>Application Not Started Yet</h2>
+    <p>Your web app isn't running on port 3000 yet.<br/>Click the <span class="btn-hint">Run ▶</span> button above, or type <span class="btn-hint">node index.js</span> in the terminal.</p>
+    <div class="hint">Auto-refreshing every 2s until server listens...</div>
+  </div>
+  <script>setTimeout(function() { window.location.reload(); }, 2000);</script>
+</body>
+</html>`);
+      } else {
+        resOrSocket.writeHead(502, { "Content-Type": "application/json" });
+        resOrSocket.end(JSON.stringify({ error: "Runner offline or booting", message: err.message }));
+      }
     } catch {}
   }
   if (resOrSocket && typeof resOrSocket.destroy === "function" && !resOrSocket.writeHead) {
