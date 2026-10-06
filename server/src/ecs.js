@@ -71,6 +71,35 @@ function getEc2Client() {
   });
 }
 
+function getIamClient() {
+  return new AWS.IAM({
+    region: process.env.AWS_REGION || "us-east-1",
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  });
+}
+
+let serviceLinkedRoleVerified = false;
+
+async function ensureServiceLinkedRole(iam) {
+  if (serviceLinkedRoleVerified) return;
+  try {
+    await iam.createServiceLinkedRole({ AWSServiceName: "ecs.amazonaws.com" }).promise();
+    console.log("[ECS] Successfully created ECS Service-Linked Role (AWSServiceRoleForECS)");
+  } catch (err) {
+    if (
+      err.code === "InvalidInput" ||
+      err.name === "InvalidInputException" ||
+      (err.message && (err.message.includes("already exists") || err.message.includes("Duplicate")))
+    ) {
+      // Role already exists
+    } else {
+      console.warn("[ECS] Notice checking ECS service-linked role:", err.message);
+    }
+  }
+  serviceLinkedRoleVerified = true;
+}
+
 /**
  * Automatically discovers default subnets in the AWS Default VPC
  */
@@ -304,6 +333,10 @@ async function createEcsSandbox({ replId, language = "node-js" }) {
 
   const ecs = getEcsClient();
   const ec2 = getEc2Client();
+  const iam = getIamClient();
+
+  // 0. Ensure ECS Service Linked Role (AWSServiceRoleForECS) exists in AWS account
+  await ensureServiceLinkedRole(iam);
 
   // Subnets: use configured or auto-discover from default VPC
   let subnets = (process.env.ECS_SUBNETS || "").split(",").map((s) => s.trim()).filter(Boolean);

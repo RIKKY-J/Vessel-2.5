@@ -199,6 +199,35 @@ function getEc2Client(): AWS.EC2 {
   });
 }
 
+function getIamClient(): AWS.IAM {
+  return new AWS.IAM({
+    region: process.env.AWS_REGION || "us-east-1",
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  });
+}
+
+let serviceLinkedRoleVerified = false;
+
+async function ensureServiceLinkedRole(iam: AWS.IAM): Promise<void> {
+  if (serviceLinkedRoleVerified) return;
+  try {
+    await iam.createServiceLinkedRole({ AWSServiceName: "ecs.amazonaws.com" }).promise();
+    console.log("[ECS] Successfully created ECS Service-Linked Role (AWSServiceRoleForECS)");
+  } catch (err: any) {
+    if (
+      err.code === "InvalidInput" ||
+      err.name === "InvalidInputException" ||
+      (err.message && (err.message.includes("already exists") || err.message.includes("Duplicate")))
+    ) {
+      // Role already exists
+    } else {
+      console.warn("[ECS] Notice checking ECS service-linked role:", err.message);
+    }
+  }
+  serviceLinkedRoleVerified = true;
+}
+
 /**
  * Extracts public or private IP from an ECS Fargate task attachment (Elastic Network Interface)
  */
@@ -312,6 +341,10 @@ export async function createEcsSandbox(params: {
   const taskDef = process.env.ECS_TASK_DEFINITION || process.env.ECS_TASK_DEF || "vessel-runner";
   const ecs = getEcsClient();
   const ec2 = getEc2Client();
+  const iam = getIamClient();
+
+  // 0. Ensure ECS Service Linked Role (AWSServiceRoleForECS) exists in AWS account
+  await ensureServiceLinkedRole(iam);
 
   let subnets = (process.env.ECS_SUBNETS || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (subnets.length === 0) {
