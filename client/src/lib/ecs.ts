@@ -75,19 +75,111 @@ async function autoDiscoverSubnets(ec2: AWS.EC2): Promise<string[]> {
   return [];
 }
 
-async function autoDiscoverSecurityGroup(ec2: AWS.EC2): Promise<string[]> {
+let cachedSecurityGroupId: string | null = null;
+
+/**
+ * Automatically configures inbound port rules (3000-3050) on a Security Group
+ */
+async function authorizePorts(ec2: AWS.EC2, sgId: string): Promise<void> {
   try {
-    const res = await ec2.describeSecurityGroups({
-      Filters: [{ Name: "group-name", Values: ["default"] }],
+    await ec2.authorizeSecurityGroupIngress({
+      GroupId: sgId,
+      IpPermissions: [
+        {
+          IpProtocol: "tcp",
+          FromPort: 3000,
+          ToPort: 3050,
+          IpRanges: [{ CidrIp: "0.0.0.0/0", Description: "Vessel IDE runner web preview and terminal ports" }],
+        },
+      ],
     }).promise();
-    if (res.SecurityGroups && res.SecurityGroups.length > 0) {
-      const sg = res.SecurityGroups[0].GroupId!;
-      console.log(`[ECS] Auto-discovered default security group:`, sg);
-      return [sg];
+    console.log(`[ECS] Auto-configured inbound TCP ports 3000-3050 on Security Group: ${sgId}`);
+  } catch (err: any) {
+    if (err.code === "InvalidPermission.Duplicate") {
+      console.log(`[ECS] Ports 3000-3050 already open on Security Group: ${sgId}`);
+    } else {
+      console.warn(`[ECS] Warning authorizing inbound ports on ${sgId}:`, err.message);
+    }
+  }
+}
+
+/**
+ * Automatically gets or creates a dedicated 'vessel-runner-sg' and opens ports 3000-3050
+ */
+async function getOrConfigureSecurityGroup(ec2: AWS.EC2): Promise<string[]> {
+  if (cachedSecurityGroupId) return [cachedSecurityGroupId];
+
+  const userSpecified = (process.env.ECS_SECURITY_GROUPS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (userSpecified.length > 0) {
+    for (const sgId of userSpecified) {
+      await authorizePorts(ec2, sgId);
+    }
+    cachedSecurityGroupId = userSpecified[0];
+    return userSpecified;
+  }
+
+  // 1. Check if dedicated 'vessel-runner-sg' exists
+  try {
+    const existing = await ec2.describeSecurityGroups({
+      Filters: [{ Name: "group-name", Values: ["vessel-runner-sg"] }],
+    }).promise();
+    if (existing.SecurityGroups && existing.SecurityGroups.length > 0) {
+      const sgId = existing.SecurityGroups[0].GroupId!;
+      console.log(`[ECS] Auto-detected existing vessel-runner-sg (${sgId}). Checking port rules...`);
+      await authorizePorts(ec2, sgId);
+      cachedSecurityGroupId = sgId;
+      return [sgId];
     }
   } catch (err: any) {
-    console.warn("[ECS] Auto-discovering default security group warning:", err.message);
+    console.warn("[ECS] Error checking existing vessel-runner-sg:", err.message);
   }
+
+  // 2. Discover default VPC ID
+  let vpcId: string | undefined = undefined;
+  try {
+    const vpcRes = await ec2.describeVpcs({
+      Filters: [{ Name: "is-default", Values: ["true"] }],
+    }).promise();
+    if (vpcRes.Vpcs && vpcRes.Vpcs.length > 0) {
+      vpcId = vpcRes.Vpcs[0].VpcId;
+    }
+  } catch (err: any) {
+    console.warn("[ECS] Error discovering default VPC for security group:", err.message);
+  }
+
+  // 3. Automatically create 'vessel-runner-sg' with port 3000-3050 permissions
+  try {
+    const createParams: AWS.EC2.CreateSecurityGroupRequest = {
+      GroupName: "vessel-runner-sg",
+      Description: "Automatic Vessel security group for app preview (3000) and terminal daemon (3001)",
+      ...(vpcId ? { VpcId: vpcId } : {}),
+    };
+    const createRes = await ec2.createSecurityGroup(createParams).promise();
+    const newSgId = createRes.GroupId!;
+    console.log(`[ECS] Automatically created dedicated Security Group ${newSgId} (vessel-runner-sg)`);
+    await authorizePorts(ec2, newSgId);
+    cachedSecurityGroupId = newSgId;
+    return [newSgId];
+  } catch (err: any) {
+    console.warn(`[ECS] Note: Could not create new SG (${err.message}). Checking default SG...`);
+  }
+
+  // 4. Fallback: discover default SG and authorize port rules on it
+  try {
+    const defaultSgRes = await ec2.describeSecurityGroups({
+      Filters: [{ Name: "group-name", Values: ["default"] }],
+    }).promise();
+    if (defaultSgRes.SecurityGroups && defaultSgRes.SecurityGroups.length > 0) {
+      const defaultSg = defaultSgRes.SecurityGroups[0];
+      console.log(`[ECS] Auto-configuring ports on default security group (${defaultSg.GroupId})...`);
+      await authorizePorts(ec2, defaultSg.GroupId!);
+      cachedSecurityGroupId = defaultSg.GroupId!;
+      return [defaultSg.GroupId!];
+    }
+  } catch (err: any) {
+    console.warn("[ECS] Fallback default security group warning:", err.message);
+  }
+
   return [];
 }
 
@@ -157,10 +249,8 @@ export async function createEcsSandbox(params: {
     subnets = await autoDiscoverSubnets(ec2);
   }
 
-  let securityGroups = (process.env.ECS_SECURITY_GROUPS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (securityGroups.length === 0) {
-    securityGroups = await autoDiscoverSecurityGroup(ec2);
-  }
+  // Security Groups: automatically discover or create dedicated SG with open ports 3000-3050
+  let securityGroups = await getOrConfigureSecurityGroup(ec2);
 
   // 1. Check if we already have an active ECS task for this replId
   const cached = ecsTasks.get(replId);
