@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Server,
   FolderGit2,
@@ -81,22 +81,27 @@ export default function WorkspaceLoadingScreen({
     `[0.4s] Requesting sandbox provisioning (${language})`,
   ]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const elapsedSecondsRef = useRef(0);
   const [isFinishing, setIsFinishing] = useState(false);
 
   // Timer ticker for elapsed seconds
   useEffect(() => {
     const timer = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
+      setElapsedSeconds((prev) => {
+        const next = prev + 1;
+        elapsedSecondsRef.current = next;
+        return next;
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Update step and log progression based on actual backend signals
+  // Step progression and auto-completion when sandbox and socket are ready
   useEffect(() => {
-    const timestamp = `[${elapsedSeconds}s]`;
+    const ts = `[${elapsedSecondsRef.current}s]`;
 
     if (error) {
-      setLogs((prev) => [...prev, `${timestamp} Error: ${error}`]);
+      setLogs((prev) => [...prev, `${ts} Error: ${error}`]);
       return;
     }
 
@@ -104,11 +109,11 @@ export default function WorkspaceLoadingScreen({
       // All steps complete!
       setCurrentStepIndex(4);
       setLogs((prev) => {
-        if (!prev.some((l) => l.includes("Terminal connected"))) {
+        if (!prev.some((l) => l.includes("WebSocket bridge connected"))) {
           return [
             ...prev,
-            `${timestamp} WebSocket bridge connected to runner daemon`,
-            `${timestamp} Interactive PTY ready. Launching workspace!`,
+            `${ts} WebSocket bridge connected to runner daemon`,
+            `${ts} Interactive PTY ready. Launching workspace!`,
           ];
         }
         return prev;
@@ -120,59 +125,58 @@ export default function WorkspaceLoadingScreen({
         onComplete();
       }, 600);
       return () => clearTimeout(exitTimer);
-    } else if (isSandboxReady) {
+    }
+
+    if (isSandboxReady) {
       // Step 3 is done, Step 4 (terminal connection) is in progress
       setCurrentStepIndex(3);
       setLogs((prev) => {
-        if (!prev.some((l) => l.includes("Daemon listening"))) {
+        if (!prev.some((l) => l.includes("Runner daemon active"))) {
           return [
             ...prev,
-            `${timestamp} Runner daemon active on port 3001`,
-            `${timestamp} Connecting WebSocket terminal bridge...`,
+            `${ts} Runner daemon active on port 3001`,
+            `${ts} Connecting WebSocket terminal bridge...`,
           ];
         }
         return prev;
       });
 
-      // Fallback timer: if container is ready but socket handshake takes > 3s, finish anyway
+      // Fallback timer: if container is verified ready, advance after 2.5s even if socket handshake was slightly delayed
       const fallbackTimer = setTimeout(() => {
+        setCurrentStepIndex(4);
         setIsFinishing(true);
         setTimeout(onComplete, 400);
-      }, 3500);
+      }, 2500);
       return () => clearTimeout(fallbackTimer);
-    } else if (sandboxStatusText.toLowerCase().includes("starting") || elapsedSeconds >= 3) {
-      // Container is booting
+    }
+  }, [isSandboxReady, isSocketConnected, error, onComplete]);
+
+  // Boot stages 1 & 2 while container is provisioning
+  useEffect(() => {
+    if (isSandboxReady || isSocketConnected) return;
+
+    if (sandboxStatusText.toLowerCase().includes("starting") || elapsedSeconds >= 3) {
       setCurrentStepIndex((prev) => Math.max(prev, 2));
       setLogs((prev) => {
         if (!prev.some((l) => l.includes("Bootstrapping runner"))) {
           return [
             ...prev,
-            `${timestamp} Workspace filesystem mounted`,
-            `${timestamp} Bootstrapping runner daemon & security sandbox...`,
+            `[${elapsedSeconds}s] Workspace filesystem mounted`,
+            `[${elapsedSeconds}s] Bootstrapping runner daemon & security sandbox...`,
           ];
         }
         return prev;
       });
     } else if (elapsedSeconds >= 1) {
-      // Step 1 complete, Step 2 active
       setCurrentStepIndex((prev) => Math.max(prev, 1));
       setLogs((prev) => {
         if (!prev.some((l) => l.includes("Allocating cloud container"))) {
-          return [...prev, `${timestamp} Allocating cloud container network & IP...`];
+          return [...prev, `[${elapsedSeconds}s] Allocating cloud container network & IP...`];
         }
         return prev;
       });
     }
-  }, [
-    isSandboxReady,
-    isSocketConnected,
-    sandboxStatusText,
-    elapsedSeconds,
-    error,
-    onComplete,
-    language,
-    replId,
-  ]);
+  }, [elapsedSeconds, sandboxStatusText, isSandboxReady, isSocketConnected]);
 
   // Overall percentage calculation
   const progressPercent = Math.min(

@@ -69,6 +69,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
   const dirtyFilesRef = useRef<Set<string>>(new Set());
 
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [isSandboxReady, setIsSandboxReady] = useState(false);
   const [sandboxStatusText, setSandboxStatusText] = useState("Connecting to sandbox...");
   const [showLoadingScreen, setShowLoadingScreen] = useState(true);
@@ -320,10 +321,12 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
       newSocket.on("connect", () => {
         console.log(`[IDE] Socket connected to runner at ${wsUrl}, transport=${newSocket.io?.engine?.transport?.name}`);
+        setIsSocketConnected(true);
       });
 
       newSocket.on("disconnect", (reason) => {
         console.warn(`[IDE] Socket disconnected from ${wsUrl}:`, reason);
+        setIsSocketConnected(false);
       });
 
       newSocket.on("fileUpdated", ({ path: filePath, content }: { path: string; content: string }) => {
@@ -341,6 +344,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
       newSocket.on("connect_error", (err) => {
         console.warn(`[IDE] Socket connection error (${wsUrl}):`, err.message);
+        setIsSocketConnected(false);
       });
 
       socketInstance = newSocket;
@@ -353,6 +357,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       if (socketInstance) {
         socketInstance.disconnect();
       }
+      setIsSocketConnected(false);
     };
   }, [isSandboxReady, replId]);
 
@@ -659,7 +664,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
           language={language}
           replId={replId}
           isSandboxReady={isSandboxReady}
-          isSocketConnected={!!(socket && socket.connected)}
+          isSocketConnected={isSocketConnected}
           sandboxStatusText={sandboxStatusText}
           error={sandboxError}
           onRetry={handleBootSandbox}
