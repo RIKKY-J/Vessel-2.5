@@ -79,6 +79,77 @@ function getIamClient() {
   });
 }
 
+function getCloudWatchLogsClient() {
+  return new AWS.CloudWatchLogs({
+    region: process.env.AWS_REGION || "us-east-1",
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  });
+}
+
+let executionRoleArnCache = null;
+
+async function ensureExecutionRole(iam) {
+  if (executionRoleArnCache) return executionRoleArnCache;
+  const roleName = "ecsTaskExecutionRole";
+  try {
+    const roleRes = await iam.getRole({ RoleName: roleName }).promise();
+    executionRoleArnCache = roleRes.Role.Arn;
+    console.log(`[ECS] Found existing ECS execution role: ${executionRoleArnCache}`);
+    return executionRoleArnCache;
+  } catch (err) {
+    if (err.code !== "NoSuchEntity" && err.name !== "NoSuchEntity") {
+      console.warn("[ECS] Notice checking ecsTaskExecutionRole:", err.message);
+    }
+  }
+
+  try {
+    const assumeRolePolicy = JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [
+        {
+          Effect: "Allow",
+          Principal: { Service: "ecs-tasks.amazonaws.com" },
+          Action: "sts:AssumeRole",
+        },
+      ],
+    });
+    const createRes = await iam.createRole({
+      RoleName: roleName,
+      AssumeRolePolicyDocument: assumeRolePolicy,
+      Description: "Allows ECS tasks to write logs to CloudWatch",
+    }).promise();
+
+    await iam.attachRolePolicy({
+      RoleName: roleName,
+      PolicyArn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+    }).promise();
+
+    executionRoleArnCache = createRes.Role.Arn;
+    console.log(`[ECS] Successfully auto-created ecsTaskExecutionRole: ${executionRoleArnCache}`);
+    return executionRoleArnCache;
+  } catch (err) {
+    console.warn("[ECS] Notice auto-creating ecsTaskExecutionRole:", err.message);
+    return null;
+  }
+}
+
+let logGroupVerified = false;
+
+async function ensureCloudWatchLogGroup() {
+  if (logGroupVerified) return;
+  const cwl = getCloudWatchLogsClient();
+  try {
+    await cwl.createLogGroup({ logGroupName: "/ecs/vessel-runner" }).promise();
+    console.log("[ECS] Successfully auto-created CloudWatch log group '/ecs/vessel-runner'");
+  } catch (err) {
+    if (err.code !== "ResourceAlreadyExistsException" && err.name !== "ResourceAlreadyExistsException") {
+      console.warn("[ECS] Notice checking CloudWatch log group:", err.message);
+    }
+  }
+  logGroupVerified = true;
+}
+
 let serviceLinkedRoleVerified = false;
 
 async function ensureServiceLinkedRole(iam) {
@@ -293,12 +364,29 @@ async function ensureTaskDefinitionAndCluster(ecs, cluster, taskDef) {
     } catch {}
   }
 
-  // 2. Ensure Task Definition exists
+  // 2. Ensure Task Definition exists with CloudWatch logs
+  const iam = getIamClient();
+  const executionRoleArn = await ensureExecutionRole(iam);
+  await ensureCloudWatchLogGroup();
+
+  let needRegister = false;
   try {
-    await ecs.describeTaskDefinition({ taskDefinition: taskDef }).promise();
-    console.log(`[ECS] Verified Task Definition '${taskDef}'.`);
+    const descTd = await ecs.describeTaskDefinition({ taskDefinition: taskDef }).promise();
+    const currentContainer = descTd.taskDefinition?.containerDefinitions?.[0];
+    const hasLogs = !!currentContainer?.logConfiguration;
+    const hasRole = !!descTd.taskDefinition?.executionRoleArn;
+    if (!hasLogs || (!hasRole && executionRoleArn)) {
+      console.log(`[ECS] Task Definition '${taskDef}' needs CloudWatch log update (hasLogs=${hasLogs}, hasRole=${hasRole}). Updating...`);
+      needRegister = true;
+    } else {
+      console.log(`[ECS] Verified Task Definition '${taskDef}' (revision: ${descTd.taskDefinition?.revision}) with CloudWatch logs.`);
+    }
   } catch (err) {
-    console.log(`[ECS] Task Definition '${taskDef}' not found. Automatically registering now...`);
+    console.log(`[ECS] Task Definition '${taskDef}' not found. Registering with CloudWatch logs...`);
+    needRegister = true;
+  }
+
+  if (needRegister) {
     try {
       const runnerImage = process.env.RUNNER_IMAGE || "rikkyj/runner:latest";
       const regParams = {
@@ -307,6 +395,7 @@ async function ensureTaskDefinitionAndCluster(ecs, cluster, taskDef) {
         requiresCompatibilities: ["FARGATE"],
         cpu: "1024",
         memory: "2048",
+        ...(executionRoleArn ? { executionRoleArn } : {}),
         containerDefinitions: [
           {
             name: "vessel-runner",
@@ -320,14 +409,22 @@ async function ensureTaskDefinitionAndCluster(ecs, cluster, taskDef) {
               { name: "PORT", value: "3001" },
               { name: "NODE_ENV", value: "production" },
             ],
+            logConfiguration: {
+              logDriver: "awslogs",
+              options: {
+                "awslogs-group": "/ecs/vessel-runner",
+                "awslogs-region": process.env.AWS_REGION || "us-east-1",
+                "awslogs-stream-prefix": "runner",
+                "awslogs-create-group": "true",
+              },
+            },
           },
         ],
       };
       const regRes = await ecs.registerTaskDefinition(regParams).promise();
-      console.log(`[ECS] Successfully auto-registered Task Definition '${taskDef}' (revision: ${regRes.taskDefinition?.revision})`);
+      console.log(`[ECS] Successfully registered Task Definition '${taskDef}' (revision: ${regRes.taskDefinition?.revision}) with CloudWatch logs`);
     } catch (regErr) {
-      console.error(`[ECS] Failed to auto-register task definition '${taskDef}':`, regErr.message);
-      throw new Error(`Task definition '${taskDef}' not found and auto-registration failed: ${regErr.message}`);
+      console.warn(`[ECS] Task definition registration notice:`, regErr.message);
     }
   }
 
@@ -604,6 +701,21 @@ function getEcsSandboxPorts(replId) {
 async function getEcsSandboxPortsAsync(replId) {
   const syncPorts = getEcsSandboxPorts(replId);
   if (syncPorts && syncPorts.containerIp) {
+    const cached = ecsTasks.get(replId);
+    if (cached?.taskArn) {
+      try {
+        const ecs = getEcsClient();
+        const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
+        const desc = await ecs.describeTasks({ cluster, tasks: [cached.taskArn] }).promise();
+        const task = desc.tasks?.[0];
+        if (task && task.lastStatus === "STOPPED") {
+          console.log(`[ECS] Cached task ${cached.taskArn} for ${replId} is STOPPED. Evicting from cache.`);
+          ecsTasks.delete(replId);
+          removePersistedEcsSandbox(replId);
+          return undefined;
+        }
+      } catch {}
+    }
     return syncPorts;
   }
   const discovered = await discoverActiveEcsTask(replId);
@@ -617,9 +729,87 @@ async function getEcsSandboxPortsAsync(replId) {
   return undefined;
 }
 
+async function getEcsLogs() {
+  const cwl = getCloudWatchLogsClient();
+  const logGroupName = "/ecs/vessel-runner";
+
+  let logGroups = [];
+  try {
+    const groupsRes = await cwl.describeLogGroups({ limit: 10 }).promise();
+    logGroups = (groupsRes.logGroups || []).map((g) => g.logGroupName);
+  } catch (e) {
+    logGroups = [`Error: ${e.message}`];
+  }
+
+  let streams = [];
+  let events = [];
+
+  try {
+    const streamRes = await cwl.describeLogStreams({
+      logGroupName,
+      orderBy: "LastEventTime",
+      descending: true,
+      limit: 5,
+    }).promise();
+    streams = streamRes.logStreams || [];
+
+    if (streams.length > 0) {
+      const latestStream = streams[0].logStreamName;
+      const eventRes = await cwl.getLogEvents({
+        logGroupName,
+        logStreamName: latestStream,
+        limit: 100,
+      }).promise();
+      events = (eventRes.events || []).map((e) => ({
+        timestamp: new Date(e.timestamp).toISOString(),
+        message: e.message,
+      }));
+    }
+  } catch (streamErr) {
+    streams = [{ error: streamErr.message }];
+  }
+
+  return {
+    logGroupName,
+    availableLogGroups: logGroups,
+    latestStream: streams[0]?.logStreamName,
+    streams: streams.map((s) => ({
+      name: s.logStreamName,
+      lastEvent: s.lastEventTimestamp ? new Date(s.lastEventTimestamp).toISOString() : null,
+      firstEvent: s.firstEventTimestamp ? new Date(s.firstEventTimestamp).toISOString() : null,
+    })),
+    events,
+  };
+}
+
 async function debugEcsTasks() {
   const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
+  const taskDef = process.env.ECS_TASK_DEFINITION || process.env.ECS_TASK_DEF || "vessel-runner";
   const ecs = getEcsClient();
+
+  let taskDefinitionInfo = null;
+  try {
+    const tdRes = await ecs.describeTaskDefinition({ taskDefinition: taskDef }).promise();
+    const td = tdRes.taskDefinition;
+    taskDefinitionInfo = {
+      family: td?.family,
+      revision: td?.revision,
+      status: td?.status,
+      executionRoleArn: td?.executionRoleArn,
+      networkMode: td?.networkMode,
+      cpu: td?.cpu,
+      memory: td?.memory,
+      containers: (td?.containerDefinitions || []).map((c) => ({
+        name: c.name,
+        image: c.image,
+        environment: c.environment,
+        logConfiguration: c.logConfiguration,
+      })),
+    };
+  } catch (e) {
+    taskDefinitionInfo = { error: e.message };
+  }
+
   const [runningRes, stoppedRes] = await Promise.all([
     ecs.listTasks({ cluster, desiredStatus: "RUNNING" }).promise().catch((e) => ({ taskArns: [], error: e.message })),
     ecs.listTasks({ cluster, desiredStatus: "STOPPED" }).promise().catch((e) => ({ taskArns: [], error: e.message })),
@@ -628,6 +818,7 @@ async function debugEcsTasks() {
   if (taskArns.length === 0) {
     return {
       cluster,
+      taskDefinition: taskDefinitionInfo,
       tasks: [],
       runningCount: (runningRes.taskArns || []).length,
       stoppedCount: (stoppedRes.taskArns || []).length,
@@ -638,8 +829,10 @@ async function debugEcsTasks() {
   const desc = await ecs.describeTasks({ cluster, tasks: taskArns.slice(-15) }).promise();
   return {
     cluster,
+    taskDefinition: taskDefinitionInfo,
     tasks: (desc.tasks || []).map((t) => ({
       taskArn: t.taskArn,
+      taskDefinitionArn: t.taskDefinitionArn,
       lastStatus: t.lastStatus,
       desiredStatus: t.desiredStatus,
       stopCode: t.stopCode,
@@ -652,7 +845,9 @@ async function debugEcsTasks() {
       })),
       replId: t.overrides?.containerOverrides?.[0]?.environment?.find((e) => e.name === "REPL_ID")?.value,
       createdAt: t.createdAt,
+      startedAt: t.startedAt,
       stoppedAt: t.stoppedAt,
+      executionStoppedAt: t.executionStoppedAt,
     })),
   };
 }
@@ -666,4 +861,5 @@ module.exports = {
   getEcsSandboxPortsAsync,
   discoverActiveEcsTask,
   debugEcsTasks,
+  getEcsLogs,
 };

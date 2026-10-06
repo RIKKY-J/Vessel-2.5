@@ -4,7 +4,7 @@ const { parse } = require("url");
 const express = require("express");
 const cors = require("cors");
 const httpProxy = require("http-proxy");
-const { startSandbox, stopSandbox, getSandboxStatus, getSandboxPorts, getSandboxPortsAsync, shouldUseEcs, debugEcsTasks } = require("./src/orchestrator");
+const { startSandbox, stopSandbox, getSandboxStatus, getSandboxPorts, getSandboxPortsAsync, shouldUseEcs, debugEcsTasks, getEcsLogs } = require("./src/orchestrator");
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -177,6 +177,15 @@ app.get("/api/ecs-debug", async (req, res) => {
   }
 });
 
+app.get("/api/ecs-logs", async (req, res) => {
+  try {
+    const data = await getEcsLogs();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Sandbox Lifecycle REST APIs ─────────────────────────────────────────────
 app.post("/api/projects/:replId/start", async (req, res) => {
   const { replId } = req.params;
@@ -196,12 +205,14 @@ app.get("/api/projects/:replId/status", async (req, res) => {
     const status = await getSandboxStatus(replId);
     const ports = await getSandboxPortsAsync(replId);
     const isReady = status.status === "RUNNING";
+    const externalUrl = process.env.RENDER_EXTERNAL_URL || "https://vessel-backend-8i2e.onrender.com";
     res.json({
       status: status.status,
       ready: isReady,
       runnerPort: ports?.runnerPort || 3001,
       appPort: ports?.appPort || 3000,
       containerIp: ports?.containerIp,
+      runnerWsUrl: externalUrl,
       error: status.error,
     });
   } catch (err) {
@@ -232,7 +243,7 @@ app.post("/api/projects/:replId/run", async (req, res) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req.body || {}),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(6000),
     });
     const data = await runRes.json().catch(() => ({}));
     // Clear preview port cache so next check immediately probes the freshly started app

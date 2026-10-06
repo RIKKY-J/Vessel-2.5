@@ -248,13 +248,20 @@ export default function Terminal({ socket, replId }: TerminalProps) {
           />
           {status === "disconnected" && (
             <button
-              onClick={() => {
+              onClick={async () => {
+                setStatus("connecting");
+                if (termInstanceRef.current) {
+                  termInstanceRef.current.writeln("\x1b[90m\r\nAttempting reconnection to sandbox daemon...\x1b[0m");
+                }
+                try {
+                  fetch(`/api/projects/${encodeURIComponent(replId)}/start`, { method: "POST" }).catch(() => {});
+                } catch {}
                 if (socketRef.current) {
                   socketRef.current.connect();
                 }
               }}
               className="text-[10px] text-rose-400 hover:text-rose-300 underline cursor-pointer"
-              title="Click to reconnect terminal socket"
+              title="Click to reconnect terminal socket and ensure container is running"
             >
               Reconnect
             </button>

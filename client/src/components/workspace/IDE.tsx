@@ -497,19 +497,31 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       });
     }
 
-    // 3. Also send backend runner API call
+    // 3. Also send backend runner API call with auto-recovery if stopped
     try {
-      await axios.post(
+      const runRes = await axios.post(
         `/api/projects/${encodeURIComponent(replId)}/run`,
         {
           command: cmdToRun,
           path: selectedFile?.path,
           content: selectedFile?.content,
         },
-        { timeout: 12000 }
+        { timeout: 8000 }
       );
+      if (runRes.data?.error && runRes.data.error.includes("stopped")) {
+        setSandboxStatusText("Sandbox stopped. Re-booting container...");
+        setIsSandboxReady(false);
+        handleBootSandbox();
+      }
     } catch (err: any) {
-      console.warn("Error running project:", err?.response?.data?.error || err.message);
+      const errMsg = err?.response?.data?.error || err.message;
+      if (err?.response?.status === 503 || (errMsg && errMsg.includes("stopped"))) {
+        setSandboxStatusText("Sandbox stopped. Re-booting container...");
+        setIsSandboxReady(false);
+        handleBootSandbox();
+      } else {
+        console.warn("Error running project:", errMsg);
+      }
     } finally {
       // 4. Trigger auto-reload in preview iframe once server starts listening
       setTimeout(() => {
