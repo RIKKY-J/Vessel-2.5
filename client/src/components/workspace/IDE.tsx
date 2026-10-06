@@ -71,6 +71,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
   const [isSandboxReady, setIsSandboxReady] = useState(false);
   const [sandboxStatusText, setSandboxStatusText] = useState("Connecting to sandbox...");
   const [runnerPort, setRunnerPort] = useState<number>(3001);
+  const [dynamicWsUrl, setDynamicWsUrl] = useState<string | null>(null);
 
   // Layout & Resizing States
   const [viewMode, setViewMode] = useState<ViewMode>("split");
@@ -207,6 +208,10 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
           setRunnerPort(res.data.runnerPort);
         }
 
+        if (res.data?.runnerWsUrl) {
+          setDynamicWsUrl(res.data.runnerWsUrl);
+        }
+
         if (res.data?.error) {
           setSandboxStatusText(`Docker: ${res.data.error}`);
         } else if (res.data?.ready) {
@@ -250,8 +255,8 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
     // Give the runner container a few seconds to fully boot its Socket.IO server
     let socketInstance: ReturnType<typeof io> | null = null;
     const connectDelay = setTimeout(() => {
-      // Use window.location.origin (Port 3000) so no secondary ports are needed
       const wsUrl =
+        dynamicWsUrl ||
         process.env.NEXT_PUBLIC_RUNNER_WS_URL ||
         (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
 
@@ -287,12 +292,12 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       });
 
       newSocket.on("connect_error", (err) => {
-        console.warn(`[IDE] Socket connection error:`, err.message);
+        console.warn(`[IDE] Socket connection error (${wsUrl}):`, err.message);
       });
 
       socketInstance = newSocket;
       setSocket(newSocket);
-    }, 3000); // Wait 3s for runner to fully start
+    }, 1500);
 
     return () => {
       clearTimeout(connectDelay);
@@ -300,7 +305,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
         socketInstance.disconnect();
       }
     };
-  }, [isSandboxReady, replId]);
+  }, [isSandboxReady, replId, dynamicWsUrl]);
 
   // Auto-save timer ref
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);

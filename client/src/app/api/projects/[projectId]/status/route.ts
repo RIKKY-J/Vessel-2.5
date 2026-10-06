@@ -27,6 +27,7 @@ export async function GET(
 
     const status = await sandboxService.getStatus(replId, user.userId);
     const isRunning = status.status === "RUNNING" && !status.error;
+    const resolvedRunnerUrl = process.env.RENDER_BACKEND_URL || process.env.NEXT_PUBLIC_RUNNER_WS_URL;
     return NextResponse.json({
       success: true,
       ready: isRunning,
@@ -35,6 +36,7 @@ export async function GET(
       runnerPort: status.runnerPort,
       containerId: status.containerId,
       error: status.error,
+      runnerWsUrl: resolvedRunnerUrl,
       statusText: status.error
         ? `Docker Error: ${status.error}`
         : isRunning
