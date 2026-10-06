@@ -1,12 +1,11 @@
-import AWS from "aws-sdk";
-import fs from "fs";
-import path from "path";
-import { SandboxInfo } from "./docker";
+const AWS = require("aws-sdk");
+const fs = require("fs");
+const path = require("path");
 
-// In-memory cache of ECS task tracking
-const ecsTasks = new Map<string, { taskArn: string; taskIp: string; appPort: number; runnerPort: number }>();
+// In-memory cache of active ECS tasks
+const ecsTasks = new Map();
 
-function getActiveSandboxesFilePath(): string {
+function getActiveSandboxesFilePath() {
   const dir = path.join(process.cwd(), "data");
   if (!fs.existsSync(dir)) {
     try {
@@ -16,13 +15,10 @@ function getActiveSandboxesFilePath(): string {
   return path.join(dir, "active-sandboxes.json");
 }
 
-function persistEcsSandbox(
-  replId: string,
-  info: { taskArn: string; taskIp: string; appPort: number; runnerPort: number }
-) {
+function persistEcsSandbox(replId, info) {
   try {
     const file = getActiveSandboxesFilePath();
-    let data: Record<string, any> = {};
+    let data = {};
     if (fs.existsSync(file)) {
       try {
         data = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -34,12 +30,12 @@ function persistEcsSandbox(
       provider: "ecs",
     };
     fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
-  } catch (err: any) {
+  } catch (err) {
     console.warn("[ECS] Error persisting sandbox:", err.message);
   }
 }
 
-function removePersistedEcsSandbox(replId: string) {
+function removePersistedEcsSandbox(replId) {
   try {
     const file = getActiveSandboxesFilePath();
     if (fs.existsSync(file)) {
@@ -50,15 +46,16 @@ function removePersistedEcsSandbox(replId: string) {
   } catch {}
 }
 
-export function isEcsConfigured(): boolean {
+function isEcsConfigured() {
+  if (process.env.SANDBOX_PROVIDER === "ecs") return true;
+  if (process.env.SANDBOX_PROVIDER === "docker") return false;
   return !!(
-    process.env.ECS_CLUSTER &&
-    (process.env.ECS_TASK_DEFINITION || process.env.ECS_TASK_DEF) &&
-    process.env.ECS_SUBNETS
+    (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ||
+    process.env.ECS_CLUSTER
   );
 }
 
-function getEcsClient(): AWS.ECS {
+function getEcsClient() {
   return new AWS.ECS({
     region: process.env.AWS_REGION || "us-east-1",
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -66,7 +63,7 @@ function getEcsClient(): AWS.ECS {
   });
 }
 
-function getEc2Client(): AWS.EC2 {
+function getEc2Client() {
   return new AWS.EC2({
     region: process.env.AWS_REGION || "us-east-1",
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -75,17 +72,53 @@ function getEc2Client(): AWS.EC2 {
 }
 
 /**
- * Extracts public or private IP from an ECS Fargate task attachment (Elastic Network Interface)
+ * Automatically discovers default subnets in the AWS Default VPC
  */
-async function resolveTaskIp(ecs: AWS.ECS, ec2: AWS.EC2, cluster: string, taskArn: string): Promise<string> {
-  // Wait up to 30 seconds for the task ENI to attach and obtain an IP address
+async function autoDiscoverSubnets(ec2) {
+  try {
+    const res = await ec2.describeSubnets({
+      Filters: [{ Name: "default-for-az", Values: ["true"] }],
+    }).promise();
+    if (res.Subnets && res.Subnets.length > 0) {
+      const subnets = res.Subnets.map((s) => s.SubnetId).filter(Boolean);
+      console.log(`[ECS] Auto-discovered ${subnets.length} default VPC subnets:`, subnets.slice(0, 2));
+      return subnets;
+    }
+  } catch (err) {
+    console.warn("[ECS] Auto-discovering default subnets warning:", err.message);
+  }
+  return [];
+}
+
+/**
+ * Automatically discovers the default security group in the default VPC
+ */
+async function autoDiscoverSecurityGroup(ec2) {
+  try {
+    const res = await ec2.describeSecurityGroups({
+      Filters: [{ Name: "group-name", Values: ["default"] }],
+    }).promise();
+    if (res.SecurityGroups && res.SecurityGroups.length > 0) {
+      const sg = res.SecurityGroups[0].GroupId;
+      console.log(`[ECS] Auto-discovered default security group:`, sg);
+      return [sg];
+    }
+  } catch (err) {
+    console.warn("[ECS] Auto-discovering default security group warning:", err.message);
+  }
+  return [];
+}
+
+/**
+ * Resolves the public or private IP of the running Fargate task
+ */
+async function resolveTaskIp(ecs, ec2, cluster, taskArn) {
   const maxAttempts = 15;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const desc = await ecs.describeTasks({ cluster, tasks: [taskArn] }).promise();
     const task = desc.tasks?.[0];
     if (!task) throw new Error(`Task ${taskArn} not found in cluster ${cluster}`);
 
-    // Check attachments for ENI ID
     const eniAttachment = task.attachments?.find((a) => a.type === "ElasticNetworkInterface");
     const eniIdDetail = eniAttachment?.details?.find((d) => d.name === "networkInterfaceId");
     const eniId = eniIdDetail?.value;
@@ -99,30 +132,34 @@ async function resolveTaskIp(ecs: AWS.ECS, ec2: AWS.EC2, cluster: string, taskAr
       }
     }
 
-    // Delay 2s before retrying
     await new Promise((r) => setTimeout(r, 2000));
   }
-
-  throw new Error("Timed out waiting for ECS Fargate task network interface attachment.");
+  throw new Error("Timed out waiting for ECS task network interface attachment.");
 }
 
 /**
- * Starts an isolated AWS ECS Fargate task running the runner container for a given replId
+ * Launches an isolated ECS Fargate sandbox task
  */
-export async function createEcsSandbox(params: {
-  replId: string;
-  language?: string;
-}): Promise<SandboxInfo> {
-  const { replId, language = "node-js" } = params;
+async function createEcsSandbox({ replId, language = "node-js" }) {
   const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
   const taskDef = process.env.ECS_TASK_DEFINITION || process.env.ECS_TASK_DEF || "vessel-runner";
-  const subnets = (process.env.ECS_SUBNETS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const securityGroups = (process.env.ECS_SECURITY_GROUPS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
   const ecs = getEcsClient();
   const ec2 = getEc2Client();
 
-  // 1. Check if we already have an active ECS task for this replId
+  // Subnets: use configured or auto-discover from default VPC
+  let subnets = (process.env.ECS_SUBNETS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (subnets.length === 0) {
+    subnets = await autoDiscoverSubnets(ec2);
+  }
+
+  // Security Groups: use configured or auto-discover default SG
+  let securityGroups = (process.env.ECS_SECURITY_GROUPS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (securityGroups.length === 0) {
+    securityGroups = await autoDiscoverSecurityGroup(ec2);
+  }
+
+  // Check if task is already running
   const cached = ecsTasks.get(replId);
   if (cached) {
     try {
@@ -141,13 +178,12 @@ export async function createEcsSandbox(params: {
     } catch {}
   }
 
-  console.log(`[ECS] Launching Fargate runner task for replId=${replId}, cluster=${cluster}, taskDef=${taskDef}`);
+  console.log(`[ECS] Starting Fargate task for ${replId} in cluster ${cluster}...`);
 
-  // 2. Launch ECS Fargate task with project environment overrides
-  const runParams: AWS.ECS.RunTaskRequest = {
+  const runParams = {
     cluster,
     taskDefinition: taskDef,
-    launchType: (process.env.ECS_LAUNCH_TYPE as any) || "FARGATE",
+    launchType: process.env.ECS_LAUNCH_TYPE || "FARGATE",
     count: 1,
     networkConfiguration: {
       awsvpcConfiguration: {
@@ -182,11 +218,7 @@ export async function createEcsSandbox(params: {
   }
 
   const taskArn = task.taskArn;
-  console.log(`[ECS] Task initiated: ${taskArn}. Resolving public/private IP...`);
-
-  // 3. Resolve the IP address of the Fargate task
   const taskIp = await resolveTaskIp(ecs, ec2, cluster, taskArn);
-  console.log(`[ECS] Task ${taskArn} active at IP: ${taskIp}`);
 
   const taskRecord = {
     taskArn,
@@ -208,15 +240,11 @@ export async function createEcsSandbox(params: {
   };
 }
 
-/**
- * Stops an active AWS ECS task for a project
- */
-export async function stopEcsSandbox(replId: string): Promise<boolean> {
+async function stopEcsSandbox(replId) {
   const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
   const ecs = getEcsClient();
 
   let taskArn = ecsTasks.get(replId)?.taskArn;
-
   if (!taskArn) {
     try {
       const file = getActiveSandboxesFilePath();
@@ -229,9 +257,8 @@ export async function stopEcsSandbox(replId: string): Promise<boolean> {
 
   if (taskArn) {
     try {
-      console.log(`[ECS] Stopping task ${taskArn} for replId=${replId}`);
       await ecs.stopTask({ cluster, task: taskArn, reason: "User stopped project sandbox" }).promise();
-    } catch (err: any) {
+    } catch (err) {
       console.warn(`[ECS] Error stopping task ${taskArn}:`, err.message);
     }
   }
@@ -241,19 +268,13 @@ export async function stopEcsSandbox(replId: string): Promise<boolean> {
   return true;
 }
 
-/**
- * Queries current status of an ECS task
- */
-export async function getEcsSandboxStatus(replId: string): Promise<SandboxInfo> {
+async function getEcsSandboxStatus(replId) {
   const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
   const ecs = getEcsClient();
 
   const cached = ecsTasks.get(replId);
   if (!cached) {
-    return {
-      replId,
-      status: "STOPPED",
-    };
+    return { replId, status: "STOPPED" };
   }
 
   try {
@@ -279,13 +300,10 @@ export async function getEcsSandboxStatus(replId: string): Promise<SandboxInfo> 
     }
   } catch {}
 
-  return {
-    replId,
-    status: "STOPPED",
-  };
+  return { replId, status: "STOPPED" };
 }
 
-export function getEcsSandboxPorts(replId: string) {
+function getEcsSandboxPorts(replId) {
   const cached = ecsTasks.get(replId);
   if (cached) {
     return {
@@ -311,3 +329,11 @@ export function getEcsSandboxPorts(replId: string) {
 
   return undefined;
 }
+
+module.exports = {
+  isEcsConfigured,
+  createEcsSandbox,
+  stopEcsSandbox,
+  getEcsSandboxStatus,
+  getEcsSandboxPorts,
+};

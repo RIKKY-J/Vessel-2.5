@@ -24,8 +24,9 @@ function loadEnvFile(filePath) {
 
 // Load env files in priority order
 const envPaths = [
-  path.resolve(__dirname, "../frontend/.env.local"),
-  path.resolve(__dirname, "../frontend/.env"),
+  path.resolve(__dirname, "../client/.env.local"),
+  path.resolve(__dirname, "../client/.env"),
+  path.resolve(__dirname, "../server/.env"),
   path.resolve(__dirname, "../.env"),
 ];
 

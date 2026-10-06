@@ -68,53 +68,39 @@ Vessel is a high-performance, in-browser cloud development platform inspired by 
 ## 📁 Repository Structure
 
 ```
-Vessel-main/
-├── frontend/                     # Next.js 14 Web Application & Proxy
-│   ├── server.js                 # Custom Node.js server (Unified HTTP + WebSocket proxy)
-│   ├── prisma/
-│   │   └── schema.prisma         # Prisma schema for PostgreSQL
-│   ├── src/app/
-│   │   ├── page.tsx              # Modern landing page
-│   │   ├── signin/page.tsx       # Authentication (Sign in / Sign up)
-│   │   ├── projects/
-│   │   │   ├── page.tsx          # User projects dashboard
-│   │   │   └── [projectId]/      # Dynamic project workspace route
-│   │   └── api/                  # API Route Handlers
-│   │       ├── auth/             # Login, signup, me, logout
-│   │       ├── docker-status/    # Docker daemon health check
-│   │       ├── preview/          # Container reverse proxy (/api/preview/:id)
-│   │       └── projects/         # Project lifecycle (start, stop, run, sync, files)
-│   ├── src/components/
-│   │   ├── editor/               # Monaco Editor, File Explorer & File Tree
-│   │   ├── terminal/             # xterm.js terminal with Socket.IO connection
-│   │   ├── preview/              # Embedded live preview iframe
-│   │   ├── workspace/            # Main IDE shell, panel layouts & Run control
-│   │   └── projects/             # Project cards, creation modal & templates
-│   ├── src/lib/
-│   │   ├── db/                   # Prisma database client
-│   │   ├── auth/                 # Password hashing & JWT sessions
-│   │   ├── s3/                   # AWS S3 sync, templates & disk storage
-│   │   └── docker.ts             # Dockerode sandbox management & resource limits
-│   └── src/services/             # Decoupled business logic service layer
+Vessel-v2.5/
+├── client/                       # Next.js 14 Frontend Web Application (Deploy to Vercel)
+│   ├── prisma/                   # Prisma schema for PostgreSQL metadata
+│   ├── public/                   # Static assets & branding
+│   ├── src/app/                  # App Router: Landing (/), Signin (/signin), IDE (/projects/[id])
+│   ├── src/components/           # Monaco Editor, File Explorer, Terminal & Live Preview
+│   └── src/lib/                  # Auth, database, S3 clients & session utilities
 │
-├── runner/                       # Sandbox Container Image
-│   ├── Dockerfile                # Runner Docker image definition
-│   ├── src/index.ts              # Express API & container entrypoint (:3001)
-│   ├── src/ws.ts                 # Socket.IO handlers for PTY & live file broadcast
+├── server/                       # Persistent Node.js Backend & Orchestrator (Deploy to Render)
+│   ├── src/                      # WebSocket Proxy, Live Preview Reverse Proxy, AWS ECS & Docker
+│   ├── prisma/                   # Prisma database client
+│   └── server.js                 # Express HTTP server & Socket.IO proxy entrypoint
+│
+├── sandbox/                      # Isolated Sandbox Container Image (Docker / AWS ECR)
+│   ├── Dockerfile                # Runner container definition
+│   ├── src/index.ts              # Express API & container daemon (:3001)
 │   ├── src/pty.ts                # node-pty pseudo-terminal wrapper for bash
-│   ├── src/fs.ts                 # Local container filesystem operations
-│   └── src/aws.ts                # S3 sync operations inside container
+│   ├── src/ws.ts                 # Socket.IO handlers for PTY & live file sync
+│   └── src/aws.ts                # S3 code hydration inside container
 │
-├── templates/                    # Starter project boilerplate
+├── templates/                    # Starter project boilerplates
 │   ├── node-js/                  # Node.js starter (index.js, package.json with --watch)
 │   └── python/                   # Python starter (main.py)
 │
-├── infra/                        # Infrastructure
-│   └── docker-compose.yml        # Development stack (PostgreSQL + Runner)
+├── infra/                        # Cloud & Container Infrastructure
+│   ├── docker-compose.yml        # Local development stack (PostgreSQL + Sandbox)
+│   └── ecs-task-definition.json  # AWS ECS Fargate task definition for sandbox
 │
-└── scripts/                      # Setup & Verification Scripts
-    ├── seed-s3.js                # Uploads starter templates to S3 bucket
-    └── verify-sandbox.js         # Validates Docker engine, PostgreSQL & S3
+├── scripts/                      # Setup & Verification Scripts
+│   ├── seed-s3.js                # Uploads starter templates to S3 bucket
+│   └── verify-sandbox.js         # Validates Docker engine, PostgreSQL & S3
+│
+└── render.yaml                   # 1-Click Render Blueprint for the backend server
 ```
 
 ---

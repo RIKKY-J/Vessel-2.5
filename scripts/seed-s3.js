@@ -1,8 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const possibleModuleDirs = [
-  path.resolve(__dirname, "../frontend/node_modules"),
-  path.resolve(__dirname, "../runner/node_modules"),
+  path.resolve(__dirname, "../client/node_modules"),
+  path.resolve(__dirname, "../server/node_modules"),
+  path.resolve(__dirname, "../sandbox/node_modules"),
 ];
 
 for (const modDir of possibleModuleDirs) {
@@ -14,9 +15,11 @@ for (const modDir of possibleModuleDirs) {
 const AWS = require("aws-sdk");
 
 
-// Load .env from frontend/.env or .env
+// Load .env from client/.env, server/.env or root .env
 const envPaths = [
-  path.resolve(__dirname, "../frontend/.env"),
+  path.resolve(__dirname, "../client/.env.local"),
+  path.resolve(__dirname, "../client/.env"),
+  path.resolve(__dirname, "../server/.env"),
   path.resolve(__dirname, "../.env")
 ];
 

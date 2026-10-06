@@ -1,0 +1,25 @@
+{
+  "name": "vessel-server",
+  "version": "1.0.0",
+  "description": "Vessel Persistent Backend, WebSocket Proxy & ECS Orchestrator",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.19.0",
+    "aws-sdk": "^2.1556.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "http-proxy": "^1.18.1",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.19.0"
+  }
+}

@@ -4,7 +4,7 @@ services:
     name: vessel-backend
     runtime: node
     plan: free
-    rootDir: frontend
+    rootDir: server
     buildCommand: npm install && npx prisma generate
     startCommand: node server.js
     envVars:
@@ -29,12 +29,8 @@ services:
       - key: SANDBOX_PROVIDER
         value: ecs
       - key: ECS_CLUSTER
-        sync: false
+        value: vessel-cluster
       - key: ECS_TASK_DEFINITION
-        sync: false
+        value: vessel-runner
       - key: ECS_LAUNCH_TYPE
         value: FARGATE
-      - key: ECS_SUBNETS
-        sync: false
-      - key: ECS_SECURITY_GROUPS
-        sync: false

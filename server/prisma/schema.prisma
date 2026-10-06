@@ -1,0 +1,70 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password_hash String
+  name          String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  projects      Project[]
+
+  @@map("users")
+}
+
+model Project {
+  id          String           @id @default(uuid())
+  user_id     String
+  name        String
+  repl_id     String           @unique
+  language    String           @default("node-js")
+  status      String           @default("STOPPED")
+  created_at  DateTime         @default(now())
+  updated_at  DateTime         @updatedAt
+
+  user        User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  settings    ProjectSettings?
+  sandboxes   Sandbox[]
+
+  @@index([user_id])
+  @@index([repl_id])
+  @@map("projects")
+}
+
+model ProjectSettings {
+  id           String   @id @default(uuid())
+  project_id   String   @unique
+  framework    String?
+  run_command  String   @default("node --watch index.js")
+  port         Int      @default(3000)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  project      Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@map("project_settings")
+}
+
+model Sandbox {
+  id           String    @id @default(uuid())
+  project_id   String
+  container_id String?
+  status       String    @default("STOPPED")
+  started_at   DateTime?
+  stopped_at   DateTime?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  project      Project   @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@map("sandboxes")
+}

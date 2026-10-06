@@ -19,12 +19,12 @@ services:
       timeout: 10s
       retries: 5
 
-  # Next.js Application
-  frontend:
+  # Next.js Application Client
+  client:
     build:
-      context: ../frontend
+      context: ../client
       dockerfile: Dockerfile
-    container_name: vessel-frontend
+    container_name: vessel-client
     restart: unless-stopped
     ports:
       - "3000:3000"
