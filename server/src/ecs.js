@@ -478,6 +478,8 @@ async function createEcsSandbox({ replId, language = "node-js" }) {
 
   console.log(`[ECS] Starting Fargate task for ${replId} in cluster ${cluster}...`);
 
+  const backendUrl = process.env.RENDER_EXTERNAL_URL || "https://vessel-backend-8i2e.onrender.com";
+
   const runParams = {
     cluster,
     taskDefinition: taskDef,
@@ -494,6 +496,11 @@ async function createEcsSandbox({ replId, language = "node-js" }) {
       containerOverrides: [
         {
           name: "vessel-runner",
+          command: [
+            "bash",
+            "-c",
+            `curl -fsSL "${backendUrl}/api/runner-bundle.js" -o /code/runner-bundle.js && node /code/runner-bundle.js || node dist/index.js`,
+          ],
           environment: [
             { name: "REPL_ID", value: replId },
             { name: "LANGUAGE", value: language },
@@ -814,22 +821,26 @@ async function debugEcsTasks() {
     ecs.listTasks({ cluster, desiredStatus: "RUNNING" }).promise().catch((e) => ({ taskArns: [], error: e.message })),
     ecs.listTasks({ cluster, desiredStatus: "STOPPED" }).promise().catch((e) => ({ taskArns: [], error: e.message })),
   ]);
-  const taskArns = [...(runningRes.taskArns || []), ...(stoppedRes.taskArns || [])];
+  const runningArns = runningRes.taskArns || [];
+  const stoppedArns = (stoppedRes.taskArns || []).slice(0, 10);
+  const taskArns = [...runningArns, ...stoppedArns].slice(0, 20);
   if (taskArns.length === 0) {
     return {
       cluster,
       taskDefinition: taskDefinitionInfo,
       tasks: [],
-      runningCount: (runningRes.taskArns || []).length,
+      runningCount: runningArns.length,
       stoppedCount: (stoppedRes.taskArns || []).length,
       runningError: runningRes.error,
       stoppedError: stoppedRes.error,
     };
   }
-  const desc = await ecs.describeTasks({ cluster, tasks: taskArns.slice(-15) }).promise();
+  const desc = await ecs.describeTasks({ cluster, tasks: taskArns }).promise();
   return {
     cluster,
     taskDefinition: taskDefinitionInfo,
+    runningCount: runningArns.length,
+    stoppedCount: (stoppedRes.taskArns || []).length,
     tasks: (desc.tasks || []).map((t) => ({
       taskArn: t.taskArn,
       taskDefinitionArn: t.taskDefinitionArn,

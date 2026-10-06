@@ -1,4 +1,6 @@
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const net = require("net");
 const { parse } = require("url");
 const express = require("express");
@@ -184,6 +186,16 @@ app.get("/api/ecs-logs", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Serve self-contained, updated runner daemon bundle for dynamic container bootstrap
+app.get("/api/runner-bundle.js", (req, res) => {
+  const bundlePath = path.join(__dirname, "src", "runner-bundle.js");
+  if (fs.existsSync(bundlePath)) {
+    res.setHeader("Content-Type", "application/javascript");
+    return res.sendFile(bundlePath);
+  }
+  res.status(404).send("// Bundle not found");
 });
 
 // ─── Sandbox Lifecycle REST APIs ─────────────────────────────────────────────
