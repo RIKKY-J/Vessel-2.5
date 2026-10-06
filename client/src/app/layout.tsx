@@ -6,11 +6,11 @@ export const metadata: Metadata = {
   description: "Spin up isolated Docker development sandboxes with real-time Monaco editor, bash terminal, and live preview.",
   icons: {
     icon: [
-      { url: "/vessel-logo.png", type: "image/png" },
-      { url: "/favicon.ico", type: "image/x-icon" },
+      { url: "/vessel-logo.png?v=3", type: "image/png" },
+      { url: "/favicon.ico?v=3", type: "image/x-icon" },
     ],
-    shortcut: "/vessel-logo.png",
-    apple: "/vessel-logo.png",
+    shortcut: "/vessel-logo.png?v=3",
+    apple: "/vessel-logo.png?v=3",
   },
 };
 
@@ -22,9 +22,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
-        <link rel="icon" href="/vessel-logo.png" type="image/png" />
-        <link rel="shortcut icon" href="/vessel-logo.png" type="image/png" />
-        <link rel="apple-touch-icon" href="/vessel-logo.png" />
+        <link rel="icon" href="/vessel-logo.png?v=3" type="image/png" />
+        <link rel="shortcut icon" href="/vessel-logo.png?v=3" type="image/png" />
+        <link rel="apple-touch-icon" href="/vessel-logo.png?v=3" />
         <script
           dangerouslySetInnerHTML={{
             __html: `
