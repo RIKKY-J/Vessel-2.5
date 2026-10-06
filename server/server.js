@@ -171,13 +171,22 @@ app.all(["/api/preview/:replId", "/api/preview/:replId/*"], (req, res) => {
   proxy.web(req, res, { target: targetUrl });
 });
 
+// ─── Socket.IO HTTP Long-Polling Reverse Proxy ───────────────────────────────
+app.all(["/socket.io", "/socket.io/*"], (req, res) => {
+  const parsedUrl = parse(req.url, true);
+  const replId = parsedUrl.query?.replId || req.query?.replId;
+  const targetUrl = getRunnerTargetUrl(replId);
+  console.log(`[Server] Proxying Socket.IO HTTP polling for ${replId} ➔ ${targetUrl}`);
+  proxy.web(req, res, { target: targetUrl });
+});
+
 // ─── Create HTTP Server & WebSocket Upgrade ──────────────────────────────────
 const server = http.createServer(app);
 
-// Proxy Socket.IO HTTP long-polling and WebSocket upgrades
+// Proxy Socket.IO WebSocket upgrades
 server.on("upgrade", (req, socket, head) => {
   const parsedUrl = parse(req.url, true);
-  if (parsedUrl.pathname && parsedUrl.pathname.startsWith("/socket.io/")) {
+  if (parsedUrl.pathname && parsedUrl.pathname.startsWith("/socket.io")) {
     const replId = parsedUrl.query?.replId;
     const targetUrl = getRunnerTargetUrl(replId);
     console.log(`[Server] Proxying WebSocket upgrade for ${replId} ➔ ${targetUrl}`);

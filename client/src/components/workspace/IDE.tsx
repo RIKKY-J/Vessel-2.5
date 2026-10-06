@@ -258,13 +258,13 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       console.log(`[IDE] Connecting Socket.IO to ${wsUrl} for replId=${replId}`);
 
       const newSocket = io(wsUrl, {
-        // Start with polling (works through HTTP proxy), then upgrade to websocket
-        transports: ["polling", "websocket"],
+        // Start with direct WebSocket, fallback to polling
+        transports: ["websocket", "polling"],
         reconnection: true,
-        reconnectionAttempts: 30,
-        reconnectionDelay: 2000,
-        reconnectionDelayMax: 5000,
-        timeout: 15000,
+        reconnectionAttempts: 40,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 3000,
+        timeout: 20000,
         query: { replId },
         auth: { replId },
       });
@@ -448,26 +448,30 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
     // 3. Also send backend runner API call
     try {
-      await axios.post(`/api/projects/${encodeURIComponent(replId)}/run`, {
-        command: cmdToRun,
-        path: selectedFile?.path,
-        content: selectedFile?.content,
-      });
+      await axios.post(
+        `/api/projects/${encodeURIComponent(replId)}/run`,
+        {
+          command: cmdToRun,
+          path: selectedFile?.path,
+          content: selectedFile?.content,
+        },
+        { timeout: 4000 }
+      );
     } catch (err) {
       console.warn("Error running project:", err);
+    } finally {
+      // 4. Trigger auto-reload in preview iframe once server starts listening
+      setTimeout(() => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("vessel:file-updated", {
+              detail: { replId, path: selectedFile?.path },
+            })
+          );
+        }
+        setIsRunning(false);
+      }, 1500);
     }
-
-    // 4. Trigger auto-reload in preview iframe once server starts listening
-    setTimeout(() => {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("vessel:file-updated", {
-            detail: { replId, path: selectedFile?.path },
-          })
-        );
-      }
-      setIsRunning(false);
-    }, 1500);
   };
 
   // Close & stop project

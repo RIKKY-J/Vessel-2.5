@@ -247,9 +247,19 @@ async function resolveTaskIp(ecs: AWS.ECS, ec2: AWS.EC2, cluster: string, taskAr
     if (eniId) {
       const netDesc = await ec2.describeNetworkInterfaces({ NetworkInterfaceIds: [eniId] }).promise();
       const iface = netDesc.NetworkInterfaces?.[0];
-      const ip = iface?.Association?.PublicIp || iface?.PrivateIpAddress;
-      if (ip) {
-        return ip;
+      const publicIp = iface?.Association?.PublicIp;
+      if (publicIp) {
+        console.log(`[ECS] Task ${taskArn} resolved Public IP: ${publicIp}`);
+        return publicIp;
+      }
+      // Wait for Public IP association unless near timeout
+      if (attempt < maxAttempts - 2) {
+        console.log(`[ECS] Task ENI attached (${iface?.PrivateIpAddress}), waiting for Public IP assignment (attempt ${attempt + 1}/${maxAttempts})...`);
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      if (iface?.PrivateIpAddress) {
+        return iface.PrivateIpAddress;
       }
     }
 
