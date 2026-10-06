@@ -14,15 +14,26 @@ async function handleProxy(
   const subpath = params.path && params.path.length > 0 ? `/${params.path.join("/")}` : "/";
   const { search } = new URL(req.url);
 
-  // Dynamic Docker container port resolution
-  const { getSandboxPorts } = await import("@/lib/docker");
-  const ports = getSandboxPorts(projectId);
-  const targetHost = ports?.containerIp || "127.0.0.1";
-  // On remote ECS, the app runs on port 3000; on local Docker host, it binds to 3002+
-  const targetPort = ports?.containerIp
-    ? (ports.appPort || 3000)
-    : (ports?.appPort && ports.appPort !== 3000 ? ports.appPort : 3002);
-  const targetUrl = process.env.SANDBOX_PREVIEW_URL_OVERRIDE || `http://${targetHost}:${targetPort}${subpath}${search}`;
+  let targetUrl = process.env.SANDBOX_PREVIEW_URL_OVERRIDE;
+  if (!targetUrl) {
+    const rawBackend = process.env.RENDER_BACKEND_URL || process.env.NEXT_PUBLIC_RUNNER_WS_URL;
+    if (rawBackend) {
+      const httpBackend = rawBackend
+        .replace(/^ws:\/\//i, "http://")
+        .replace(/^wss:\/\//i, "https://")
+        .replace(/\/+$/, "");
+      targetUrl = `${httpBackend}/api/preview/${encodeURIComponent(projectId)}${subpath}${search}`;
+    } else {
+      // Dynamic Docker container port resolution for local development
+      const { getSandboxPorts } = await import("@/lib/docker");
+      const ports = getSandboxPorts(projectId);
+      const targetHost = ports?.containerIp || "127.0.0.1";
+      const targetPort = ports?.containerIp
+        ? (ports.appPort || 3000)
+        : (ports?.appPort && ports.appPort !== 3000 ? ports.appPort : 3002);
+      targetUrl = `http://${targetHost}:${targetPort}${subpath}${search}`;
+    }
+  }
 
   try {
     const controller = new AbortController();

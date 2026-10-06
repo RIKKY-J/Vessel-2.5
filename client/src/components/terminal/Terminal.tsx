@@ -246,6 +246,19 @@ export default function Terminal({ socket, replId }: TerminalProps) {
             }`}
             title={`Status: ${status}`}
           />
+          {status === "disconnected" && (
+            <button
+              onClick={() => {
+                if (socketRef.current) {
+                  socketRef.current.connect();
+                }
+              }}
+              className="text-[10px] text-rose-400 hover:text-rose-300 underline cursor-pointer"
+              title="Click to reconnect terminal socket"
+            >
+              Reconnect
+            </button>
+          )}
           <span className="text-[10px] font-mono text-slate-500 hidden sm:inline">
             bash &bull; node-pty
           </span>

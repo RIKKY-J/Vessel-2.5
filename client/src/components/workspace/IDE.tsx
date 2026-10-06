@@ -218,6 +218,11 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
           if (pollInterval) clearInterval(pollInterval);
           setSandboxStatusText("Sandbox ready! Connecting terminal...");
           setIsSandboxReady(true);
+        } else if (res.data?.status === "STARTING") {
+          setSandboxStatusText("Container booting runner daemon...");
+        } else if (res.data?.status === "STOPPED") {
+          setSandboxStatusText("Sandbox stopped. Click Run ▶ to boot.");
+          setIsSandboxReady(false);
         } else if (res.data?.statusText) {
           setSandboxStatusText(res.data.statusText);
         }
@@ -247,6 +252,30 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       if (pollInterval) clearInterval(pollInterval);
     };
   }, [replId]);
+
+  const handleBootSandbox = async () => {
+    setSandboxStatusText("Booting sandbox container...");
+    setIsSandboxReady(false);
+    try {
+      await axios.post(`/api/projects/${encodeURIComponent(replId)}/start`);
+      const poll = setInterval(async () => {
+        try {
+          const res = await axios.get(`/api/projects/${encodeURIComponent(replId)}/status`);
+          if (res.data?.runnerWsUrl) {
+            setDynamicWsUrl(res.data.runnerWsUrl);
+          }
+          if (res.data?.ready) {
+            clearInterval(poll);
+            setIsSandboxReady(true);
+            setSandboxStatusText("Sandbox ready! Connecting terminal...");
+          }
+        } catch {}
+      }, 1500);
+      setTimeout(() => clearInterval(poll), 60000);
+    } catch (err: any) {
+      setSandboxStatusText(`Start error: ${err.message}`);
+    }
+  };
 
   // Connect WebSocket to Runner via unified Port 3000 proxy
   useEffect(() => {
@@ -433,6 +462,16 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
     if (viewMode === "code") {
       setViewMode("split");
+    }
+
+    // 0. Auto-start sandbox container if not ready
+    if (!isSandboxReady) {
+      setSandboxStatusText("Booting sandbox container...");
+      try {
+        await axios.post(`/api/projects/${encodeURIComponent(replId)}/start`);
+      } catch (err: any) {
+        console.warn("Error auto-starting sandbox:", err.message);
+      }
     }
 
     // 1. Ensure all active/modified files are written to /workspace before running
@@ -832,6 +871,15 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
                 ? "Sandbox Ready (Connecting WebSocket...)"
                 : sandboxStatusText}
             </span>
+            {!isSandboxReady && (
+              <button
+                onClick={handleBootSandbox}
+                className="text-[#E73F1E] hover:text-[#ff4d29] underline cursor-pointer ml-1 font-semibold"
+                title="Restart container"
+              >
+                [Boot Container]
+              </button>
+            )}
           </span>
           <span className="text-slate-600">|</span>
           <span className="text-slate-400">{selectedFile ? selectedFile.path : "No active file"}</span>

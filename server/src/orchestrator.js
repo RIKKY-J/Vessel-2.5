@@ -1,4 +1,4 @@
-const { isEcsConfigured, createEcsSandbox, stopEcsSandbox, getEcsSandboxStatus, getEcsSandboxPorts } = require("./ecs");
+const { isEcsConfigured, createEcsSandbox, stopEcsSandbox, getEcsSandboxStatus, getEcsSandboxPorts, getEcsSandboxPortsAsync } = require("./ecs");
 const { createDockerSandbox, stopDockerSandbox, getDockerSandboxStatus, getDockerSandboxPorts } = require("./docker");
 
 function shouldUseEcs() {
@@ -34,10 +34,19 @@ function getSandboxPorts(replId) {
   return getDockerSandboxPorts(replId);
 }
 
+async function getSandboxPortsAsync(replId) {
+  if (shouldUseEcs()) {
+    const ecsPorts = await getEcsSandboxPortsAsync(replId);
+    if (ecsPorts) return ecsPorts;
+  }
+  return getDockerSandboxPorts(replId);
+}
+
 module.exports = {
   shouldUseEcs,
   startSandbox,
   stopSandbox,
   getSandboxStatus,
   getSandboxPorts,
+  getSandboxPortsAsync,
 };

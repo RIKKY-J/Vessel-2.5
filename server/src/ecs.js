@@ -469,13 +469,80 @@ async function stopEcsSandbox(replId) {
   return true;
 }
 
+/**
+ * Queries AWS ECS to discover any active RUNNING or PENDING Fargate task
+ * matching REPL_ID, restoring in-memory and disk cache.
+ */
+async function discoverActiveEcsTask(replId) {
+  // 1. Check in-memory cache
+  const cached = ecsTasks.get(replId);
+  if (cached && cached.taskIp) {
+    return cached;
+  }
+
+  // 2. Check disk persistence
+  const persisted = getEcsSandboxPorts(replId);
+  if (persisted && persisted.containerIp) {
+    const record = {
+      taskArn: persisted.containerId || persisted.taskArn,
+      taskIp: persisted.containerIp,
+      appPort: persisted.appPort || 3000,
+      runnerPort: persisted.runnerPort || 3001,
+    };
+    ecsTasks.set(replId, record);
+    return record;
+  }
+
+  // 3. Query AWS ECS directly for active tasks matching REPL_ID
+  try {
+    const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
+    const ecs = getEcsClient();
+    const ec2 = getEc2Client();
+
+    const listRes = await ecs.listTasks({ cluster, desiredStatus: "RUNNING" }).promise();
+    const taskArns = listRes.taskArns || [];
+    if (taskArns.length === 0) return null;
+
+    const descRes = await ecs.describeTasks({ cluster, tasks: taskArns.slice(0, 50) }).promise();
+    for (const task of descRes.tasks || []) {
+      if (task.lastStatus === "STOPPED") continue;
+      const overrides = task.overrides?.containerOverrides || [];
+      const replEnv = overrides
+        .flatMap((c) => c.environment || [])
+        .find((env) => env.name === "REPL_ID" && env.value === replId);
+
+      if (replEnv) {
+        console.log(`[ECS] Auto-discovered active ECS task for ${replId}: ${task.taskArn} (${task.lastStatus})`);
+        const taskIp = await resolveTaskIp(ecs, ec2, cluster, task.taskArn);
+        const record = {
+          taskArn: task.taskArn,
+          taskIp,
+          appPort: 3000,
+          runnerPort: 3001,
+        };
+        ecsTasks.set(replId, record);
+        persistEcsSandbox(replId, record);
+        return record;
+      }
+    }
+  } catch (err) {
+    console.warn(`[ECS] Error during auto-discovery for ${replId}:`, err.message);
+  }
+
+  return null;
+}
+
 async function getEcsSandboxStatus(replId) {
   const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
   const ecs = getEcsClient();
 
-  const cached = ecsTasks.get(replId);
+  let cached = ecsTasks.get(replId);
   if (!cached) {
-    return { replId, status: "STOPPED" };
+    // Attempt auto-discovery in case Render restarted
+    cached = await discoverActiveEcsTask(replId);
+    if (!cached) {
+      return { replId, status: "STOPPED" };
+    }
   }
 
   try {
@@ -501,6 +568,9 @@ async function getEcsSandboxStatus(replId) {
     }
   } catch {}
 
+  // Task is no longer active in ECS
+  ecsTasks.delete(replId);
+  removePersistedEcsSandbox(replId);
   return { replId, status: "STOPPED" };
 }
 
@@ -531,10 +601,28 @@ function getEcsSandboxPorts(replId) {
   return undefined;
 }
 
+async function getEcsSandboxPortsAsync(replId) {
+  const syncPorts = getEcsSandboxPorts(replId);
+  if (syncPorts && syncPorts.containerIp) {
+    return syncPorts;
+  }
+  const discovered = await discoverActiveEcsTask(replId);
+  if (discovered && discovered.taskIp) {
+    return {
+      appPort: discovered.appPort || 3000,
+      runnerPort: discovered.runnerPort || 3001,
+      containerIp: discovered.taskIp,
+    };
+  }
+  return undefined;
+}
+
 module.exports = {
   isEcsConfigured,
   createEcsSandbox,
   stopEcsSandbox,
   getEcsSandboxStatus,
   getEcsSandboxPorts,
+  getEcsSandboxPortsAsync,
+  discoverActiveEcsTask,
 };

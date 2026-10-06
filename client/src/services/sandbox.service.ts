@@ -4,6 +4,12 @@ import { syncFilesToS3, saveProjectFile } from "@/lib/s3/projects";
 import { copyTemplateToProject } from "@/lib/s3/templates";
 import axios from "axios";
 
+function getBackendUrl(): string | undefined {
+  const url = process.env.RENDER_BACKEND_URL || process.env.NEXT_PUBLIC_RUNNER_WS_URL;
+  if (!url) return undefined;
+  return url.replace(/^ws:\/\//i, "http://").replace(/^wss:\/\//i, "https://").replace(/\/+$/, "");
+}
+
 export class SandboxService {
   async startSandbox(replId: string, userId?: string) {
     const project = await projectService.getProjectByReplId(replId, userId);
@@ -17,7 +23,7 @@ export class SandboxService {
     } catch {}
 
     // 1. Provision container via Render backend (production on Vercel) or local Docker (local dev)
-    const backendUrl = process.env.RENDER_BACKEND_URL;
+    const backendUrl = getBackendUrl();
     if (backendUrl) {
       try {
         const res = await axios.post(`${backendUrl}/api/projects/${replId}/start`, {
@@ -48,7 +54,7 @@ export class SandboxService {
       throw new Error(`Project ${replId} not found`);
     }
 
-    const backendUrl = process.env.RENDER_BACKEND_URL;
+    const backendUrl = getBackendUrl();
     if (backendUrl) {
       try {
         await axios.post(`${backendUrl}/api/projects/${replId}/stop`);
@@ -81,7 +87,7 @@ export class SandboxService {
       await projectService.getProjectByReplId(replId, userId);
     }
 
-    const backendUrl = process.env.RENDER_BACKEND_URL;
+    const backendUrl = getBackendUrl();
     if (backendUrl) {
       try {
         const res = await axios.get(`${backendUrl}/api/projects/${replId}/status`);
@@ -108,7 +114,7 @@ export class SandboxService {
     // Update settings with last used command
     await projectService.updateSettings(project.id, { run_command: command });
 
-    const backendUrl = process.env.RENDER_BACKEND_URL;
+    const backendUrl = getBackendUrl();
     if (backendUrl) {
       try {
         await axios.post(`${backendUrl}/api/projects/${replId}/run`, { command, path });
