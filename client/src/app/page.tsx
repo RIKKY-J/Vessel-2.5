@@ -88,11 +88,11 @@ export default function HomeLandingPage() {
       {/* Top Navigation Bar */}
       <header className="h-16 border-b border-[#232936] px-6 sm:px-12 flex items-center justify-between sticky top-0 bg-[#0B0D11]/95 z-50">
         <div className="flex items-center gap-3">
-          <Link href="/" className="flex items-center gap-2 group cursor-pointer">
-            <div className="w-8 h-8 rounded-lg bg-white p-1 flex items-center justify-center border border-slate-200 shadow-sm shrink-0 overflow-hidden group-hover:scale-105 transition">
-              <img src="/vessel-logo.png" alt="Vessel Logo" className="w-full h-full object-contain" />
+          <Link href="/" className="flex items-center gap-2.5 group cursor-pointer">
+            <div className="w-10 h-10 rounded-xl bg-white p-1 flex items-center justify-center border border-slate-200 shadow-sm shrink-0 overflow-hidden group-hover:scale-105 transition">
+              <img src="/vessel-logo.png" alt="Vessel Logo" className="w-full h-full object-contain scale-125" />
             </div>
-            <span className="font-semibold text-sm tracking-wide text-white font-mono">
+            <span className="font-semibold text-base tracking-wide text-white font-mono">
               vessel.editor
             </span>
           </Link>

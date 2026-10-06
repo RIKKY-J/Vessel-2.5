@@ -637,8 +637,8 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
             <span>Projects</span>
           </button>
           <span className="text-slate-600">/</span>
-          <div className="w-6 h-6 rounded-md bg-white p-0.5 flex items-center justify-center shrink-0 shadow-sm border border-slate-200">
-            <img src="/vessel-logo.png" alt="Vessel" className="w-full h-full object-contain" />
+          <div className="w-8 h-8 rounded-lg bg-white p-0.5 flex items-center justify-center shrink-0 shadow-sm border border-slate-200 overflow-hidden">
+            <img src="/vessel-logo.png" alt="Vessel" className="w-full h-full object-contain scale-125" />
           </div>
           <span className="font-mono text-xs font-bold text-slate-200 truncate">
             {initialProject.name}
