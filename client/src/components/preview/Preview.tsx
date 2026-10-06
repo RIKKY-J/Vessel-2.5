@@ -52,7 +52,7 @@ export default function Preview({ replId }: PreviewProps) {
         <div className="flex items-center gap-2 flex-1 min-w-0 mr-3">
           <Globe className="w-3.5 h-3.5 text-[#E73F1E]" />
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#0B0D11] border border-[#232936] rounded-md text-[11px] font-mono text-slate-300 flex-1 truncate">
-            <span className="text-emerald-400 font-bold">
+            <span className="text-emerald-400 font-bold" suppressHydrationWarning>
               {typeof window !== "undefined" && window.location.protocol === "https:" ? "HTTPS" : "HTTP"}
             </span>
             <span className="text-slate-500">|</span>

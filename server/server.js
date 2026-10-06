@@ -68,10 +68,33 @@ function checkTcpPort(host, port, timeoutMs = 1500) {
   });
 }
 
+const portStatusCache = new Map();
+
+async function isAppPortListening(replId, host, port) {
+  const cached = portStatusCache.get(replId);
+  const now = Date.now();
+  if (cached && now - cached.timestamp < 1500) {
+    return cached.isOpen;
+  }
+  const isOpen = await checkTcpPort(host, port, 1200);
+  portStatusCache.set(replId, { isOpen, timestamp: now });
+  return isOpen;
+}
+
 // ─── Proxy Setup ─────────────────────────────────────────────────────────────
 const proxy = httpProxy.createProxyServer({
   ws: true,
   changeOrigin: true,
+});
+
+// Re-stream JSON body if express.json() consumed the request stream
+proxy.on("proxyReq", (proxyReq, req) => {
+  if (req.body && Object.keys(req.body).length > 0) {
+    const bodyData = JSON.stringify(req.body);
+    proxyReq.setHeader("Content-Type", "application/json");
+    proxyReq.setHeader("Content-Length", Buffer.byteLength(bodyData));
+    proxyReq.write(bodyData);
+  }
 });
 
 proxy.on("error", (err, req, resOrSocket) => {
@@ -181,30 +204,57 @@ app.post("/api/projects/:replId/stop", async (req, res) => {
   const { replId } = req.params;
   try {
     await stopSandbox(replId);
+    portStatusCache.delete(replId);
     res.json({ success: true, message: `Sandbox ${replId} stopped` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Forward run command into runner container
+// Forward run command into runner container via direct HTTP
 app.post("/api/projects/:replId/run", async (req, res) => {
   const { replId } = req.params;
   const targetUrl = await getRunnerTargetUrl(replId);
   if (!targetUrl) {
     return res.status(503).json({ error: "Sandbox is stopped. Please start the sandbox first." });
   }
-  proxy.web(req, res, { target: targetUrl });
+  try {
+    const runRes = await fetch(`${targetUrl}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body || {}),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await runRes.json().catch(() => ({}));
+    // Clear preview port cache so next check immediately probes the freshly started app
+    portStatusCache.delete(replId);
+    return res.status(runRes.status).json(data);
+  } catch (err) {
+    console.error(`[Server] Error executing /run for ${replId}:`, err.message);
+    return res.status(502).json({ error: err.message });
+  }
 });
 
-// Forward sync files into runner container
+// Forward sync files into runner container via direct HTTP
 app.post("/api/projects/:replId/sync", async (req, res) => {
   const { replId } = req.params;
   const targetUrl = await getRunnerTargetUrl(replId);
   if (!targetUrl) {
     return res.status(503).json({ error: "Sandbox is stopped. Please start the sandbox first." });
   }
-  proxy.web(req, res, { target: targetUrl });
+  try {
+    const syncRes = await fetch(`${targetUrl}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body || {}),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await syncRes.json().catch(() => ({}));
+    return res.status(syncRes.status).json(data);
+  } catch (err) {
+    console.error(`[Server] Error executing /sync for ${replId}:`, err.message);
+    return res.status(502).json({ error: err.message });
+  }
 });
 
 // ─── Live Web Preview Reverse Proxy ──────────────────────────────────────────
@@ -219,7 +269,7 @@ app.all(["/api/preview/:replId", "/api/preview/:replId/*"], async (req, res) => 
   }
 
   // Fast check: Is the user application actually listening on the port?
-  const portOpen = await checkTcpPort(previewInfo.host, previewInfo.port, 1500);
+  const portOpen = await isAppPortListening(replId, previewInfo.host, previewInfo.port);
   if (!portOpen) {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     return res.end(renderStandbyHtml());
@@ -244,7 +294,6 @@ app.all(["/socket.io", "/socket.io/*"], async (req, res) => {
   if (!targetUrl) {
     return res.status(503).json({ error: "Runner offline or stopped", replId });
   }
-  console.log(`[Server] Proxying Socket.IO HTTP polling for ${replId} ➔ ${targetUrl}`);
   proxy.web(req, res, { target: targetUrl });
 });
 

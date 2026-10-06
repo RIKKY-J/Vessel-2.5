@@ -281,9 +281,12 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
   useEffect(() => {
     if (!isSandboxReady || !replId) return;
 
-    // Give the runner container a few seconds to fully boot its Socket.IO server
     let socketInstance: ReturnType<typeof io> | null = null;
+    let isCancelled = false;
+
     const connectDelay = setTimeout(() => {
+      if (isCancelled) return;
+
       const wsUrl =
         dynamicWsUrl ||
         process.env.NEXT_PUBLIC_RUNNER_WS_URL ||
@@ -292,10 +295,9 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       console.log(`[IDE] Connecting Socket.IO to ${wsUrl} for replId=${replId}`);
 
       const newSocket = io(wsUrl, {
-        // Start with direct WebSocket, fallback to polling
         transports: ["websocket", "polling"],
         reconnection: true,
-        reconnectionAttempts: 40,
+        reconnectionAttempts: 50,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 3000,
         timeout: 20000,
@@ -305,6 +307,10 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
       newSocket.on("connect", () => {
         console.log(`[IDE] Socket connected to runner at ${wsUrl}, transport=${newSocket.io?.engine?.transport?.name}`);
+      });
+
+      newSocket.on("disconnect", (reason) => {
+        console.warn(`[IDE] Socket disconnected from ${wsUrl}:`, reason);
       });
 
       newSocket.on("fileUpdated", ({ path: filePath, content }: { path: string; content: string }) => {
@@ -326,15 +332,16 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
       socketInstance = newSocket;
       setSocket(newSocket);
-    }, 1500);
+    }, 1200);
 
     return () => {
+      isCancelled = true;
       clearTimeout(connectDelay);
       if (socketInstance) {
         socketInstance.disconnect();
       }
     };
-  }, [isSandboxReady, replId, dynamicWsUrl]);
+  }, [isSandboxReady, replId]);
 
   // Auto-save timer ref
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -499,10 +506,10 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
           path: selectedFile?.path,
           content: selectedFile?.content,
         },
-        { timeout: 4000 }
+        { timeout: 12000 }
       );
-    } catch (err) {
-      console.warn("Error running project:", err);
+    } catch (err: any) {
+      console.warn("Error running project:", err?.response?.data?.error || err.message);
     } finally {
       // 4. Trigger auto-reload in preview iframe once server starts listening
       setTimeout(() => {
