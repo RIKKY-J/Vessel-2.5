@@ -23,6 +23,7 @@ import Editor from "@/components/editor/Editor";
 import FileExplorer from "@/components/editor/FileExplorer";
 import Preview from "@/components/preview/Preview";
 import RunButton from "./RunButton";
+import WorkspaceLoadingScreen from "./WorkspaceLoadingScreen";
 
 const Terminal = dynamic(() => import("@/components/terminal/Terminal"), {
   ssr: false,
@@ -70,6 +71,8 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isSandboxReady, setIsSandboxReady] = useState(false);
   const [sandboxStatusText, setSandboxStatusText] = useState("Connecting to sandbox...");
+  const [showLoadingScreen, setShowLoadingScreen] = useState(true);
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
   const [runnerPort, setRunnerPort] = useState<number>(3001);
   const [dynamicWsUrl, setDynamicWsUrl] = useState<string | null>(null);
 
@@ -214,12 +217,15 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
         if (res.data?.error) {
           setSandboxStatusText(`Docker: ${res.data.error}`);
+          setSandboxError(res.data.error);
         } else if (res.data?.ready) {
           if (pollInterval) clearInterval(pollInterval);
           setSandboxStatusText("Sandbox ready! Connecting terminal...");
+          setSandboxError(null);
           setIsSandboxReady(true);
         } else if (res.data?.status === "STARTING") {
           setSandboxStatusText("Container booting runner daemon...");
+          setSandboxError(null);
         } else if (res.data?.status === "STOPPED") {
           setSandboxStatusText("Sandbox stopped. Click Run ▶ to boot.");
           setIsSandboxReady(false);
@@ -237,6 +243,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
         if (!isMounted) return;
         if (res.data?.sandbox?.error) {
           setSandboxStatusText(`Docker: ${res.data.sandbox.error}`);
+          setSandboxError(res.data.sandbox.error);
         }
         checkStatus();
         pollInterval = setInterval(checkStatus, 1500);
@@ -244,7 +251,10 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       .catch((err) => {
         const msg = err?.response?.data?.error || err.message;
         console.warn("Start sandbox error:", msg);
-        if (isMounted) setSandboxStatusText(`Container start error: ${msg}`);
+        if (isMounted) {
+          setSandboxStatusText(`Container start error: ${msg}`);
+          setSandboxError(msg);
+        }
       });
 
     return () => {
@@ -255,6 +265,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
 
   const handleBootSandbox = async () => {
     setSandboxStatusText("Booting sandbox container...");
+    setSandboxError(null);
     setIsSandboxReady(false);
     try {
       await axios.post(`/api/projects/${encodeURIComponent(replId)}/start`);
@@ -267,6 +278,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
           if (res.data?.ready) {
             clearInterval(poll);
             setIsSandboxReady(true);
+            setSandboxError(null);
             setSandboxStatusText("Sandbox ready! Connecting terminal...");
           }
         } catch {}
@@ -274,6 +286,7 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       setTimeout(() => clearInterval(poll), 60000);
     } catch (err: any) {
       setSandboxStatusText(`Start error: ${err.message}`);
+      setSandboxError(err.message);
     }
   };
 
@@ -620,11 +633,27 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
   const isDraggingAny = isDraggingSidebar || isDraggingMain || isDraggingRight;
 
   return (
-    <div
-      className={`h-screen w-screen bg-[#0B0D11] text-white flex flex-col overflow-hidden font-sans select-none ${
-        isDraggingAny ? "cursor-grabbing select-none" : ""
-      }`}
-    >
+    <>
+      {showLoadingScreen && (
+        <WorkspaceLoadingScreen
+          projectName={initialProject.name}
+          language={language}
+          replId={replId}
+          isSandboxReady={isSandboxReady}
+          isSocketConnected={!!(socket && socket.connected)}
+          sandboxStatusText={sandboxStatusText}
+          error={sandboxError}
+          onRetry={handleBootSandbox}
+          onComplete={() => setShowLoadingScreen(false)}
+          onSkip={() => setShowLoadingScreen(false)}
+        />
+      )}
+
+      <div
+        className={`h-screen w-screen bg-[#0B0D11] text-white flex flex-col overflow-hidden font-sans select-none ${
+          isDraggingAny ? "cursor-grabbing select-none" : ""
+        }`}
+      >
       {/* Top IDE Toolbar */}
       <header className="h-12 border-b border-[#232936] bg-[#12151B] px-4 flex items-center justify-between shrink-0 z-30">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -911,5 +940,6 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
         </div>
       </footer>
     </div>
+    </>
   );
 }
