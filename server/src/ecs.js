@@ -620,10 +620,22 @@ async function getEcsSandboxPortsAsync(replId) {
 async function debugEcsTasks() {
   const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
   const ecs = getEcsClient();
-  const listRes = await ecs.listTasks({ cluster }).promise();
-  const taskArns = listRes.taskArns || [];
-  if (taskArns.length === 0) return { cluster, tasks: [] };
-  const desc = await ecs.describeTasks({ cluster, tasks: taskArns.slice(-10) }).promise();
+  const [runningRes, stoppedRes] = await Promise.all([
+    ecs.listTasks({ cluster, desiredStatus: "RUNNING" }).promise().catch((e) => ({ taskArns: [], error: e.message })),
+    ecs.listTasks({ cluster, desiredStatus: "STOPPED" }).promise().catch((e) => ({ taskArns: [], error: e.message })),
+  ]);
+  const taskArns = [...(runningRes.taskArns || []), ...(stoppedRes.taskArns || [])];
+  if (taskArns.length === 0) {
+    return {
+      cluster,
+      tasks: [],
+      runningCount: (runningRes.taskArns || []).length,
+      stoppedCount: (stoppedRes.taskArns || []).length,
+      runningError: runningRes.error,
+      stoppedError: stoppedRes.error,
+    };
+  }
+  const desc = await ecs.describeTasks({ cluster, tasks: taskArns.slice(-15) }).promise();
   return {
     cluster,
     tasks: (desc.tasks || []).map((t) => ({
@@ -639,6 +651,8 @@ async function debugEcsTasks() {
         reason: c.reason,
       })),
       replId: t.overrides?.containerOverrides?.[0]?.environment?.find((e) => e.name === "REPL_ID")?.value,
+      createdAt: t.createdAt,
+      stoppedAt: t.stoppedAt,
     })),
   };
 }
