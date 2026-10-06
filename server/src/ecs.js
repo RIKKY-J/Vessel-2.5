@@ -617,6 +617,32 @@ async function getEcsSandboxPortsAsync(replId) {
   return undefined;
 }
 
+async function debugEcsTasks() {
+  const cluster = process.env.ECS_CLUSTER || "vessel-cluster";
+  const ecs = getEcsClient();
+  const listRes = await ecs.listTasks({ cluster }).promise();
+  const taskArns = listRes.taskArns || [];
+  if (taskArns.length === 0) return { cluster, tasks: [] };
+  const desc = await ecs.describeTasks({ cluster, tasks: taskArns.slice(-10) }).promise();
+  return {
+    cluster,
+    tasks: (desc.tasks || []).map((t) => ({
+      taskArn: t.taskArn,
+      lastStatus: t.lastStatus,
+      desiredStatus: t.desiredStatus,
+      stopCode: t.stopCode,
+      stoppedReason: t.stoppedReason,
+      containers: (t.containers || []).map((c) => ({
+        name: c.name,
+        lastStatus: c.lastStatus,
+        exitCode: c.exitCode,
+        reason: c.reason,
+      })),
+      replId: t.overrides?.containerOverrides?.[0]?.environment?.find((e) => e.name === "REPL_ID")?.value,
+    })),
+  };
+}
+
 module.exports = {
   isEcsConfigured,
   createEcsSandbox,
@@ -625,4 +651,5 @@ module.exports = {
   getEcsSandboxPorts,
   getEcsSandboxPortsAsync,
   discoverActiveEcsTask,
+  debugEcsTasks,
 };

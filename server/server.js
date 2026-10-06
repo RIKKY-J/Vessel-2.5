@@ -4,7 +4,7 @@ const { parse } = require("url");
 const express = require("express");
 const cors = require("cors");
 const httpProxy = require("http-proxy");
-const { startSandbox, stopSandbox, getSandboxStatus, getSandboxPorts, getSandboxPortsAsync, shouldUseEcs } = require("./src/orchestrator");
+const { startSandbox, stopSandbox, getSandboxStatus, getSandboxPorts, getSandboxPortsAsync, shouldUseEcs, debugEcsTasks } = require("./src/orchestrator");
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -166,6 +166,15 @@ app.get("/api/docker-status", (req, res) => {
     provider: shouldUseEcs() ? "ecs" : "docker",
     ecsConfigured: shouldUseEcs(),
   });
+});
+
+app.get("/api/ecs-debug", async (req, res) => {
+  try {
+    const data = await debugEcsTasks();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Sandbox Lifecycle REST APIs ─────────────────────────────────────────────

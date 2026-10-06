@@ -1,4 +1,4 @@
-const { isEcsConfigured, createEcsSandbox, stopEcsSandbox, getEcsSandboxStatus, getEcsSandboxPorts, getEcsSandboxPortsAsync } = require("./ecs");
+const { isEcsConfigured, createEcsSandbox, stopEcsSandbox, getEcsSandboxStatus, getEcsSandboxPorts, getEcsSandboxPortsAsync, debugEcsTasks } = require("./ecs");
 const { createDockerSandbox, stopDockerSandbox, getDockerSandboxStatus, getDockerSandboxPorts } = require("./docker");
 
 function shouldUseEcs() {
@@ -49,4 +49,5 @@ module.exports = {
   getSandboxStatus,
   getSandboxPorts,
   getSandboxPortsAsync,
+  debugEcsTasks,
 };
