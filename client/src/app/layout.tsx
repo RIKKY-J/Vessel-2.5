@@ -5,7 +5,12 @@ export const metadata: Metadata = {
   title: "Vessel - Cloud IDE",
   description: "Spin up isolated Docker development sandboxes with real-time Monaco editor, bash terminal, and live preview.",
   icons: {
-    icon: "/vessel-logo.png",
+    icon: [
+      { url: "/vessel-logo.png", type: "image/png" },
+      { url: "/favicon.ico", type: "image/x-icon" },
+    ],
+    shortcut: "/vessel-logo.png",
+    apple: "/vessel-logo.png",
   },
 };
 
@@ -17,6 +22,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
+        <link rel="icon" href="/vessel-logo.png" type="image/png" />
+        <link rel="shortcut icon" href="/vessel-logo.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/vessel-logo.png" />
         <script
           dangerouslySetInnerHTML={{
             __html: `

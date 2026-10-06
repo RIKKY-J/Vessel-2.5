@@ -220,7 +220,7 @@ export default function WorkspaceLoadingScreen({
               <img
                 src="/vessel-logo.png"
                 alt="Vessel Logo"
-                className="w-full h-full object-contain scale-125"
+                className="w-full h-full object-contain scale-105"
               />
             </div>
             <div>

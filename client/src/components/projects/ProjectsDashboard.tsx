@@ -131,7 +131,7 @@ export default function ProjectsDashboard({ initialProjects, user }: ProjectsDas
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2.5 group">
             <div className="w-10 h-10 rounded-xl bg-white p-1 flex items-center justify-center border border-slate-200 shadow-sm shrink-0 overflow-hidden group-hover:scale-105 transition">
-              <img src="/vessel-logo.png" alt="Vessel Logo" className="w-full h-full object-contain scale-125" />
+              <img src="/vessel-logo.png" alt="Vessel Logo" className="w-full h-full object-contain scale-105" />
             </div>
             <span className="font-semibold text-base tracking-wide text-white font-mono">
               vessel.projects
