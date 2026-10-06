@@ -406,7 +406,8 @@ async function ensureTaskDefinitionAndCluster(ecs, cluster, taskDef) {
               { name: "runner-port", containerPort: 3001, hostPort: 3001, protocol: "tcp" },
             ],
             environment: [
-              { name: "PORT", value: "3001" },
+              { name: "RUNNER_PORT", value: "3001" },
+              { name: "PORT", value: "3000" },
               { name: "NODE_ENV", value: "production" },
             ],
             logConfiguration: {
@@ -508,7 +509,8 @@ async function createEcsSandbox({ replId, language = "node-js" }) {
             { name: "AWS_REGION", value: process.env.AWS_REGION || "us-east-1" },
             { name: "AWS_ACCESS_KEY_ID", value: process.env.AWS_ACCESS_KEY_ID || "" },
             { name: "AWS_SECRET_ACCESS_KEY", value: process.env.AWS_SECRET_ACCESS_KEY || "" },
-            { name: "PORT", value: "3001" },
+            { name: "RUNNER_PORT", value: "3001" },
+            { name: "PORT", value: "3000" },
           ],
         },
       ],

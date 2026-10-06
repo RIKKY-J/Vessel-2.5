@@ -211,7 +211,7 @@ if __name__ == '__main__':
     } else {
       const jsContent = `const express = require('express');
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
 
 app.use(express.json());
 
@@ -362,6 +362,10 @@ var TerminalManager = class {
       console.log(`[PTY] Killing existing PTY for socket ${id} before creating new one`);
       this.clear(id);
     }
+    // Kill any conflicting background daemon process so port 3000 is clear for the terminal
+    if (typeof stopUserProcess === "function") {
+      stopUserProcess();
+    }
     const workspaceDir = import_fs3.default.existsSync("/workspace") ? "/workspace" : process.cwd();
     if (ptyModule) {
       try {
@@ -375,6 +379,7 @@ var TerminalManager = class {
             cwd: workspaceDir,
             env: {
               ...process.env,
+              PORT: "3000",
               TERM: "xterm-256color",
               COLORTERM: "truecolor",
               SHELL,
@@ -411,6 +416,7 @@ var TerminalManager = class {
       cwd: workspaceDir,
       env: {
         ...process.env,
+        PORT: "3000",
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
         SHELL,
@@ -638,6 +644,17 @@ function runUserProcess(command) {
   activeProcess = child;
   return { pid: child.pid, command };
 }
+function stopUserProcess() {
+  if (activeProcess) {
+    try {
+      console.log(`[Process] Terminating active process PID: ${activeProcess.pid}`);
+      activeProcess.kill("SIGTERM");
+    } catch (err) {
+      console.warn("[Process] Error terminating active process:", err);
+    }
+    activeProcess = null;
+  }
+}
 
 // sandbox/src/index.ts
 import_dotenv.default.config();
@@ -677,8 +694,12 @@ app.post("/run", async (req, res) => {
   const result = runUserProcess(command || "node --watch index.js");
   return res.json({ success: true, ...result });
 });
+app.post("/stop-process", (req, res) => {
+  stopUserProcess();
+  return res.json({ success: true, message: "Active process terminated" });
+});
 initWs(httpServer);
-var port = process.env.PORT || 3001;
+var port = process.env.RUNNER_PORT || (process.env.PORT === "3000" ? 3001 : process.env.PORT) || 3001;
 httpServer.listen(port, () => {
   console.log(`[Runner] Daemon listening on port ${port}`);
 });

@@ -502,40 +502,59 @@ export default function IDE({ initialProject, initialFiles, user }: IDEProps) {
       runCommand ||
       (initialProject.language === "python" ? "python3 main.py" : "node --watch index.js");
 
-    // 2. Send Ctrl+C followed by the command into the terminal PTY for live terminal output
-    if (socket && socket.connected) {
-      socket.emit("terminalData", {
-        data: `\x03\r\n${cmdToRun}\r\n`,
-        terminalId: 0,
-      });
-    }
-
-    // 3. Also send backend runner API call with auto-recovery if stopped
     try {
-      const runRes = await axios.post(
-        `/api/projects/${encodeURIComponent(replId)}/run`,
-        {
-          command: cmdToRun,
-          path: selectedFile?.path,
-          content: selectedFile?.content,
-        },
-        { timeout: 8000 }
-      );
-      if (runRes.data?.error && runRes.data.error.includes("stopped")) {
-        setSandboxStatusText("Sandbox stopped. Re-booting container...");
-        setIsSandboxReady(false);
-        handleBootSandbox();
-      }
-    } catch (err: any) {
-      const errMsg = err?.response?.data?.error || err.message;
-      if (err?.response?.status === 503 || (errMsg && errMsg.includes("stopped"))) {
-        setSandboxStatusText("Sandbox stopped. Re-booting container...");
-        setIsSandboxReady(false);
-        handleBootSandbox();
+      // 2. Send Ctrl+C followed by setting PORT=3000 and the command into the terminal PTY
+      if (socket && socket.connected) {
+        socket.emit("terminalData", {
+          data: `\x03\r\nexport PORT=3000\r\n${cmdToRun}\r\n`,
+          terminalId: 0,
+        });
+
+        // Update project settings with last run command & stop any background process holding port 3000
+        try {
+          await axios.post(
+            `/api/projects/${encodeURIComponent(replId)}/run`,
+            {
+              command: cmdToRun,
+              path: selectedFile?.path,
+              content: selectedFile?.content,
+              headless: false,
+            },
+            { timeout: 8000 }
+          );
+        } catch (err: any) {
+          console.warn("Error updating run settings:", err.message);
+        }
       } else {
-        console.warn("Error running project:", errMsg);
+      // 3. Fallback: headless backend runner if terminal is not connected
+      try {
+        const runRes = await axios.post(
+          `/api/projects/${encodeURIComponent(replId)}/run`,
+          {
+            command: cmdToRun,
+            path: selectedFile?.path,
+            content: selectedFile?.content,
+            headless: true,
+          },
+          { timeout: 8000 }
+        );
+        if (runRes.data?.error && runRes.data.error.includes("stopped")) {
+          setSandboxStatusText("Sandbox stopped. Re-booting container...");
+          setIsSandboxReady(false);
+          handleBootSandbox();
+        }
+      } catch (err: any) {
+        const errMsg = err?.response?.data?.error || err.message;
+        if (err?.response?.status === 503 || (errMsg && errMsg.includes("stopped"))) {
+          setSandboxStatusText("Sandbox stopped. Re-booting container...");
+          setIsSandboxReady(false);
+          handleBootSandbox();
+        } else {
+          console.warn("Error running project:", errMsg);
+        }
       }
-    } finally {
+    }
+  } finally {
       // 4. Trigger auto-reload in preview iframe once server starts listening
       setTimeout(() => {
         if (typeof window !== "undefined") {

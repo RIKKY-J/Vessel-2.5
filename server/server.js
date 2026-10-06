@@ -246,11 +246,23 @@ app.post("/api/projects/:replId/stop", async (req, res) => {
 // Forward run command into runner container via direct HTTP
 app.post("/api/projects/:replId/run", async (req, res) => {
   const { replId } = req.params;
+  const { headless = true } = req.body || {};
   const targetUrl = await getRunnerTargetUrl(replId);
   if (!targetUrl) {
     return res.status(503).json({ error: "Sandbox is stopped. Please start the sandbox first." });
   }
   try {
+    if (headless === false) {
+      // Interactive run: kill any background process so port 3000 is 100% free for the terminal
+      await fetch(`${targetUrl}/stop-process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+      portStatusCache.delete(replId);
+      return res.json({ success: true, mode: "interactive" });
+    }
+
     const runRes = await fetch(`${targetUrl}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

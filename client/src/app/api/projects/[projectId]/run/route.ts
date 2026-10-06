@@ -26,13 +26,13 @@ export async function POST(
     }
 
     const body = await req.json();
-    const { command, path, content } = body;
+    const { command, path, content, headless } = body;
 
     if (!command) {
       return NextResponse.json({ error: "Command is required" }, { status: 400 });
     }
 
-    const result = await sandboxService.runCommand(replId, command, path, content, user.userId);
+    const result = await sandboxService.runCommand(replId, command, path, content, user.userId, headless);
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("[API] Run command error:", err);

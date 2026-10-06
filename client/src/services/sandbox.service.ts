@@ -100,7 +100,14 @@ export class SandboxService {
     return dockerGetStatus(replId);
   }
 
-  async runCommand(replId: string, command: string, path?: string, content?: string, userId?: string) {
+  async runCommand(
+    replId: string,
+    command: string,
+    path?: string,
+    content?: string,
+    userId?: string,
+    headless: boolean = true
+  ) {
     const project = await projectService.getProjectByReplId(replId, userId);
     if (!project) {
       throw new Error(`Project ${replId} not found`);
@@ -117,7 +124,7 @@ export class SandboxService {
     const backendUrl = getBackendUrl();
     if (backendUrl) {
       try {
-        await axios.post(`${backendUrl}/api/projects/${replId}/run`, { command, path });
+        await axios.post(`${backendUrl}/api/projects/${replId}/run`, { command, path, headless });
       } catch (err: any) {
         console.warn(`[SandboxService] Runner /run error on Render backend:`, err.message);
       }
@@ -127,12 +134,21 @@ export class SandboxService {
     const ports = getSandboxPorts(replId);
     if (ports?.runnerPort) {
       try {
-        // Instruct runner to run the process
-        await axios.post(
-          `http://localhost:${ports.runnerPort}/run`,
-          { command, path },
-          { timeout: 4000 }
-        );
+        if (headless === false) {
+          // Interactive mode: kill any background process so port 3000 is free for terminal
+          await axios.post(
+            `http://localhost:${ports.runnerPort}/stop-process`,
+            {},
+            { timeout: 3000 }
+          ).catch(() => {});
+        } else {
+          // Headless mode: instruct runner to spawn process
+          await axios.post(
+            `http://localhost:${ports.runnerPort}/run`,
+            { command, path },
+            { timeout: 4000 }
+          );
+        }
       } catch (err: any) {
         console.warn(`[SandboxService] Runner /run error on port ${ports.runnerPort}:`, err.message);
       }

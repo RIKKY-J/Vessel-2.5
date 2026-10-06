@@ -6,7 +6,7 @@ import { createServer } from "http";
 import { initWs } from "./ws";
 import cors from "cors";
 import { saveFolderToS3 } from "./aws";
-import { runUserProcess } from "./process";
+import { runUserProcess, stopUserProcess } from "./process";
 
 // Prevent container crash on unhandled errors
 process.on("uncaughtException", (err) => {
@@ -54,9 +54,14 @@ app.post("/run", async (req, res) => {
   return res.json({ success: true, ...result });
 });
 
+app.post("/stop-process", (req, res) => {
+  stopUserProcess();
+  return res.json({ success: true, message: "Active process terminated" });
+});
+
 initWs(httpServer);
 
-const port = process.env.PORT || 3001;
+const port = process.env.RUNNER_PORT || (process.env.PORT === "3000" ? 3001 : process.env.PORT) || 3001;
 httpServer.listen(port, () => {
   console.log(`[Runner] Daemon listening on port ${port}`);
 });

@@ -1,5 +1,6 @@
 import fs from "fs";
 import { spawn as cpSpawn } from "child_process";
+import { stopUserProcess } from "./process";
 
 let ptyModule: any = null;
 try {
@@ -31,6 +32,9 @@ export class TerminalManager {
             this.clear(id);
         }
 
+        // Kill any background daemon process so port 3000 is free for the interactive terminal
+        stopUserProcess();
+
         const workspaceDir = fs.existsSync("/workspace") ? "/workspace" : process.cwd();
 
         // Strategy 1: Attempt native node-pty
@@ -46,6 +50,7 @@ export class TerminalManager {
                         cwd: workspaceDir,
                         env: {
                             ...process.env,
+                            PORT: '3000',
                             TERM: 'xterm-256color',
                             COLORTERM: 'truecolor',
                             SHELL: SHELL,
@@ -89,6 +94,7 @@ export class TerminalManager {
             cwd: workspaceDir,
             env: {
                 ...process.env,
+                PORT: '3000',
                 TERM: 'xterm-256color',
                 COLORTERM: 'truecolor',
                 SHELL: SHELL,
